@@ -1,0 +1,381 @@
+{
+  "schema_version": "1",
+  "catalog_version": "2026-07-01",
+  "currency": "USD",
+  "unit": "per_mtok",
+  "usd_per_credit": "0.04",
+  "sources": [
+    {
+      "url": "https://platform.claude.com/docs/en/pricing",
+      "retrieved_at": "2026-06-01"
+    },
+    {
+      "url": "https://help.openai.com/en/articles/20001106-codex-rate-card",
+      "retrieved_at": "2026-07-01"
+    }
+  ],
+  "models": [
+    {
+      "model_key": "claude-fable-5",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "rates": [
+        {
+          "rate_id": "claude-fable-5-2026",
+          "effective_from": "2025-01-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "10.0",
+          "cache_read": "1.00",
+          "cache_write_5m": "12.50",
+          "cache_write_1h": "20.0",
+          "output": "50.0"
+        }
+      ]
+    },
+    {
+      "model_key": "claude-mythos-5",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "rates": [
+        {
+          "rate_id": "claude-mythos-5-2026",
+          "effective_from": "2025-01-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "10.0",
+          "cache_read": "1.00",
+          "cache_write_5m": "12.50",
+          "cache_write_1h": "20.0",
+          "output": "50.0"
+        }
+      ]
+    },
+    {
+      "model_key": "claude-opus-4-8",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "rates": [
+        {
+          "rate_id": "claude-opus-4-8-2026",
+          "effective_from": "2025-01-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "5.0",
+          "cache_read": "0.50",
+          "cache_write_5m": "6.25",
+          "cache_write_1h": "10.0",
+          "output": "25.0"
+        }
+      ]
+    },
+    {
+      "model_key": "claude-opus-4-7",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "rates": [
+        {
+          "rate_id": "claude-opus-4-7-2026",
+          "effective_from": "2025-01-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "5.0",
+          "cache_read": "0.50",
+          "cache_write_5m": "6.25",
+          "cache_write_1h": "10.0",
+          "output": "25.0"
+        }
+      ]
+    },
+    {
+      "model_key": "claude-opus-4-6",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "rates": [
+        {
+          "rate_id": "claude-opus-4-6-2026",
+          "effective_from": "2025-01-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "5.0",
+          "cache_read": "0.50",
+          "cache_write_5m": "6.25",
+          "cache_write_1h": "10.0",
+          "output": "25.0"
+        }
+      ]
+    },
+    {
+      "model_key": "claude-sonnet-4-6",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "rates": [
+        {
+          "rate_id": "claude-sonnet-4-6-2026",
+          "effective_from": "2025-01-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "3.0",
+          "cache_read": "0.30",
+          "cache_write_5m": "3.75",
+          "cache_write_1h": "6.0",
+          "output": "15.0"
+        }
+      ]
+    },
+    {
+      "model_key": "claude-sonnet-5",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "rates": [
+        {
+          "rate_id": "claude-sonnet-5-launch-promo",
+          "effective_from": "2026-01-01T00:00:00+00:00",
+          "effective_until": "2026-09-01T00:00:00+00:00",
+          "input_nocache": "2.0",
+          "cache_read": "0.20",
+          "cache_write_5m": "2.50",
+          "cache_write_1h": "4.0",
+          "output": "10.0"
+        },
+        {
+          "rate_id": "claude-sonnet-5-standard",
+          "effective_from": "2026-09-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "3.0",
+          "cache_read": "0.30",
+          "cache_write_5m": "3.75",
+          "cache_write_1h": "6.0",
+          "output": "15.0"
+        }
+      ]
+    },
+    {
+      "model_key": "claude-haiku-4-5",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "rates": [
+        {
+          "rate_id": "claude-haiku-4-5-2026",
+          "effective_from": "2025-01-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "1.0",
+          "cache_read": "0.10",
+          "cache_write_5m": "1.25",
+          "cache_write_1h": "2.0",
+          "output": "5.0"
+        }
+      ]
+    },
+    {
+      "model_key": "gpt-5.5",
+      "aliases": ["gpt-5.5-codex"],
+      "fast_multiplier": "2.5",
+      "credits_per_mtok": {
+        "input_nocache": "125.0",
+        "cache_read": "12.5",
+        "cache_write_5m": null,
+        "cache_write_1h": null,
+        "output": "750.0"
+      },
+      "rates": [
+        {
+          "rate_id": "gpt-5.5-2026-07",
+          "effective_from": "2026-07-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "5.0",
+          "cache_read": "0.50",
+          "cache_write_5m": null,
+          "cache_write_1h": null,
+          "output": "30.0"
+        }
+      ]
+    },
+    {
+      "model_key": "gpt-5.5-cyber",
+      "aliases": [],
+      "fast_multiplier": "2.5",
+      "credits_per_mtok": {
+        "input_nocache": "500.0",
+        "cache_read": "50.0",
+        "cache_write_5m": null,
+        "cache_write_1h": null,
+        "output": "3000.0"
+      },
+      "rates": [
+        {
+          "rate_id": "gpt-5.5-cyber-2026-07",
+          "effective_from": "2026-07-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "20.0",
+          "cache_read": "2.0",
+          "cache_write_5m": null,
+          "cache_write_1h": null,
+          "output": "120.0"
+        }
+      ]
+    },
+    {
+      "model_key": "gpt-5.4",
+      "aliases": ["gpt-5.4-codex"],
+      "fast_multiplier": "2.0",
+      "credits_per_mtok": {
+        "input_nocache": "62.5",
+        "cache_read": "6.25",
+        "cache_write_5m": null,
+        "cache_write_1h": null,
+        "output": "375.0"
+      },
+      "rates": [
+        {
+          "rate_id": "gpt-5.4-2026-07",
+          "effective_from": "2026-07-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "2.5",
+          "cache_read": "0.25",
+          "cache_write_5m": null,
+          "cache_write_1h": null,
+          "output": "15.0"
+        }
+      ]
+    },
+    {
+      "model_key": "gpt-5.4-mini",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "credits_per_mtok": {
+        "input_nocache": "18.75",
+        "cache_read": "1.875",
+        "cache_write_5m": null,
+        "cache_write_1h": null,
+        "output": "113.0"
+      },
+      "rates": [
+        {
+          "rate_id": "gpt-5.4-mini-2026-07",
+          "effective_from": "2026-07-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "0.75",
+          "cache_read": "0.075",
+          "cache_write_5m": null,
+          "cache_write_1h": null,
+          "output": "4.52"
+        }
+      ]
+    },
+    {
+      "model_key": "gpt-5.3-codex",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "credits_per_mtok": {
+        "input_nocache": "43.75",
+        "cache_read": "4.375",
+        "cache_write_5m": null,
+        "cache_write_1h": null,
+        "output": "350.0"
+      },
+      "rates": [
+        {
+          "rate_id": "gpt-5.3-codex-2026-07",
+          "effective_from": "2026-07-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "1.75",
+          "cache_read": "0.175",
+          "cache_write_5m": null,
+          "cache_write_1h": null,
+          "output": "14.0"
+        }
+      ]
+    },
+    {
+      "model_key": "gpt-5.2",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "credits_per_mtok": {
+        "input_nocache": "43.75",
+        "cache_read": "4.375",
+        "cache_write_5m": null,
+        "cache_write_1h": null,
+        "output": "350.0"
+      },
+      "rates": [
+        {
+          "rate_id": "gpt-5.2-2026-07",
+          "effective_from": "2026-07-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "1.75",
+          "cache_read": "0.175",
+          "cache_write_5m": null,
+          "cache_write_1h": null,
+          "output": "14.0"
+        }
+      ]
+    },
+    {
+      "model_key": "gpt-5.2-codex",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "credits_per_mtok": {
+        "input_nocache": "43.75",
+        "cache_read": "4.375",
+        "cache_write_5m": null,
+        "cache_write_1h": null,
+        "output": "350.0"
+      },
+      "rates": [
+        {
+          "rate_id": "gpt-5.2-codex-2026-07",
+          "effective_from": "2026-07-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "1.75",
+          "cache_read": "0.175",
+          "cache_write_5m": null,
+          "cache_write_1h": null,
+          "output": "14.0"
+        }
+      ]
+    },
+    {
+      "model_key": "gpt-image-2",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "credits_per_mtok": {
+        "input_nocache": "200.0",
+        "cache_read": "50.0",
+        "cache_write_5m": null,
+        "cache_write_1h": null,
+        "output": "750.0"
+      },
+      "rates": [
+        {
+          "rate_id": "gpt-image-2-2026-07",
+          "effective_from": "2026-07-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "8.0",
+          "cache_read": "2.0",
+          "cache_write_5m": null,
+          "cache_write_1h": null,
+          "output": "30.0"
+        }
+      ]
+    },
+    {
+      "model_key": "gpt-image-2-text",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "credits_per_mtok": {
+        "input_nocache": "125.0",
+        "cache_read": "31.25",
+        "cache_write_5m": null,
+        "cache_write_1h": null,
+        "output": "250.0"
+      },
+      "rates": [
+        {
+          "rate_id": "gpt-image-2-text-2026-07",
+          "effective_from": "2026-07-01T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "5.0",
+          "cache_read": "1.25",
+          "cache_write_5m": null,
+          "cache_write_1h": null,
+          "output": "10.0"
+        }
+      ]
+    }
+  ]
+}
