@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import datetime, timezone
 
 from agent_cost.readers.codex import (
     fetch_threads,
@@ -223,10 +224,42 @@ def test_multiple_cumulative_events_produce_deltas(tmp_path):
     second = by_ts["2026-06-01T00:02:00+00:00"]
     assert second["input_nocache"] == 120  # (250-100) - (50-20) = 150-30
     assert second["cache_read"] == 30
-    assert second["output"] == 50  # (90-50) + (10-0)
+    assert second["output"] == 40  # 90-50 (reasoning_output_tokens is not additive, see below)
 
 
-def test_reasoning_output_tokens_combined_into_output(tmp_path):
+def test_first_delta_is_flagged_with_source_quality(tmp_path):
+    rollout = tmp_path / "r2b.jsonl"
+    events = [
+        {"type": "event_msg", "timestamp": "2026-06-01T00:00:00Z", "payload": {"type": "token_count", "info": {"total_token_usage": None}}},
+        {
+            "type": "event_msg",
+            "timestamp": "2026-06-01T00:01:00Z",
+            "payload": {
+                "type": "token_count",
+                "info": {"total_token_usage": {"input_tokens": 100, "cached_input_tokens": 20, "output_tokens": 50, "reasoning_output_tokens": 0}},
+            },
+        },
+        {
+            "type": "event_msg",
+            "timestamp": "2026-06-01T00:02:00Z",
+            "payload": {
+                "type": "token_count",
+                "info": {"total_token_usage": {"input_tokens": 250, "cached_input_tokens": 50, "output_tokens": 90, "reasoning_output_tokens": 0}},
+            },
+        },
+    ]
+    rollout.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    facts, _, _ = parse_rollout_facts(rollout, model_raw="gpt-5.5", session_id="t1")
+    first_facts = [f for f in facts if f.occurred_at_utc.isoformat() == "2026-06-01T00:01:00+00:00"]
+    second_facts = [f for f in facts if f.occurred_at_utc.isoformat() == "2026-06-01T00:02:00+00:00"]
+    assert first_facts and all(f.source_quality == "first_event_delta" for f in first_facts)
+    assert second_facts and all(f.source_quality == "ok" for f in second_facts)
+
+
+def test_reasoning_output_tokens_are_not_double_counted(tmp_path):
+    # Real rollout data confirms total_tokens == input_tokens + output_tokens
+    # exactly; reasoning_output_tokens is a breakdown of output_tokens, not
+    # an addition on top of it.
     rollout = tmp_path / "r3.jsonl"
     events = [
         {
@@ -241,7 +274,7 @@ def test_reasoning_output_tokens_combined_into_output(tmp_path):
     rollout.write_text("\n".join(json.dumps(e) for e in events) + "\n")
     facts, _, _ = parse_rollout_facts(rollout, model_raw="gpt-5.5", session_id="t1")
     output_fact = [f for f in facts if f.token_kind == "output"][0]
-    assert output_fact.tokens == 12
+    assert output_fact.tokens == 5
 
 
 def test_negative_delta_is_skipped_and_counted(tmp_path):
@@ -375,6 +408,48 @@ def test_tokens_used_vs_rollout_diff_flagged(tmp_path):
     )
     result = read_codex_facts(db_path, codex_home)
     assert result.tokens_used_diffs == 1
+
+
+def test_thread_created_before_window_but_used_inside_it_is_included(tmp_path):
+    # Regression: threads.created_at_ms must never hard-filter a thread out
+    # -- a long-lived thread created well before the report window can
+    # still emit usage events inside it, and those must not be dropped.
+    codex_home = tmp_path / "codex_home"
+    codex_home.mkdir()
+    rollout = codex_home / "r1.jsonl"
+    events = [
+        {
+            "type": "event_msg",
+            "timestamp": "2026-06-15T00:00:00Z",  # inside the window below
+            "payload": {
+                "type": "token_count",
+                "info": {"total_token_usage": {"input_tokens": 10, "cached_input_tokens": 0, "output_tokens": 5, "reasoning_output_tokens": 0}},
+            },
+        },
+    ]
+    rollout.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+
+    db_path = codex_home / "state_5.sqlite"
+    _make_db(
+        db_path,
+        CURRENT_SCHEMA,
+        [
+            {
+                "id": "t1",
+                "model": "gpt-5.5",
+                "rollout_path": str(rollout),
+                "tokens_used": 15,
+                # Thread "created" long before the window -- a created_at_ms
+                # filter would have excluded it entirely.
+                "created_at_ms": 0,
+            }
+        ],
+    )
+    since = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    until = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    result = read_codex_facts(db_path, codex_home, since_utc=since, until_utc=until)
+    assert len(result.facts) == 2
+    assert sum(f.tokens for f in result.facts) == 15
 
 
 def test_read_codex_facts_skips_missing_rollout_file(tmp_path):

@@ -26,6 +26,14 @@ TOKEN_KINDS = (
 AGENTS = ("claude", "codex")
 MODES = ("fast", "normal", "unknown")
 
+# Closed set of source_quality values a reader may attach to a fact. "ok"
+# covers the ordinary case; readers add a more specific value only when a
+# fact's derivation has a real, nameable caveat worth surfacing downstream
+# (e.g. Codex's first delta in a rollout is measured against an assumed
+# zero baseline). This is never left unset -- every Fact defaults to "ok"
+# so export never emits a null source_quality.
+SOURCE_QUALITY_VALUES = ("ok", "first_event_delta")
+
 _BRACKET_SUFFIX = re.compile(r"\[[^\]]*\]$")
 _DATE_SUFFIX = re.compile(r"@\d{6,8}$")
 _VARIANT_SUFFIX = re.compile(r"-(?:1m|200k|fast|latest)$", re.IGNORECASE)
@@ -68,7 +76,7 @@ class Fact:
     token_kind: str
     tokens: int
     mode: str = "unknown"
-    source_quality: Optional[str] = None
+    source_quality: str = "ok"
 
     def __post_init__(self) -> None:
         if self.agent not in AGENTS:
@@ -77,6 +85,8 @@ class Fact:
             raise ValueError(f"invalid token_kind: {self.token_kind!r}")
         if self.mode not in MODES:
             raise ValueError(f"invalid mode: {self.mode!r}")
+        if self.source_quality not in SOURCE_QUALITY_VALUES:
+            raise ValueError(f"invalid source_quality: {self.source_quality!r}")
         if self.tokens < 0:
             raise ValueError(f"tokens must be >= 0, got {self.tokens}")
         if self.occurred_at_utc.tzinfo is None:

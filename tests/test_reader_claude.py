@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 
 from agent_cost.readers.claude import parse_session_facts, read_claude_facts
 
@@ -212,6 +213,34 @@ def test_fact_total_equals_raw_usage_total(tmp_path):
     raw_total = (111 + 222 + 333 + 444) + (10 + 20 + 30 + 40)
     fact_total = sum(f.tokens for f in facts)
     assert fact_total == raw_total
+
+
+def test_file_modified_after_until_still_yields_in_window_facts(tmp_path):
+    # Regression: a session file is append-only and its mtime reflects the
+    # *last* write, which can be long after an earlier in-window event was
+    # recorded (e.g. the same file gets a new message after the report
+    # window closes). An until-side mtime skip would drop that file
+    # entirely and silently lose real in-window data.
+    projects = tmp_path / "projects"
+    proj = projects / "-Users-a-work-proj"
+    proj.mkdir(parents=True)
+    write_jsonl(
+        proj / "session.jsonl",
+        [
+            _event(
+                type="assistant",
+                timestamp="2026-06-10T00:00:00Z",  # inside the window below
+                sessionId="s1",
+                message={"model": "claude-opus-4-8", "usage": {"input_tokens": 42, "output_tokens": 7}},
+            )
+        ],
+    )
+    # The file's actual mtime (just written, "now") is well after `until`
+    # below -- this is the scenario the until-side skip used to break.
+    since = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    until = datetime(2026, 6, 15, tzinfo=timezone.utc)
+    result = read_claude_facts(projects, since_utc=since, until_utc=until)
+    assert sum(f.tokens for f in result.facts) == 49
 
 
 def test_read_claude_facts_walks_project_dirs(tmp_path):

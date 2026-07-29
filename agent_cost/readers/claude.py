@@ -136,24 +136,28 @@ def read_claude_facts(
 ) -> ReadResult:
     """Read every session file under ``claude_projects_dir`` into facts.
 
-    File mtime is used only as a coarse "can we skip reading this file
-    entirely" optimization (with a wide +/-1 day margin); the actual
-    since/until boundary is always re-checked per fact below.
+    A file's mtime is used only as a coarse "can we skip reading this
+    file entirely" optimization on the *since* side: a file untouched
+    since well before the window cannot contain any event inside it
+    (every event's timestamp is <= the file's mtime), so skipping it is
+    safe. There is no equivalent skip on the *until* side -- a file
+    modified after the window can easily still contain earlier events
+    that fall inside it, so skipping on a late mtime would silently drop
+    real in-window data. The exact since/until boundary is always
+    re-checked per fact below regardless.
     """
     all_facts: list = []
     malformed_total = 0
     skipped_files = 0
 
     for jsonl_path in iter_project_files(claude_projects_dir):
-        if since_utc is not None or until_utc is not None:
+        if since_utc is not None:
             try:
                 mtime = datetime.fromtimestamp(jsonl_path.stat().st_mtime, tz=timezone.utc)
             except OSError:
                 skipped_files += 1
                 continue
-            if since_utc is not None and mtime < since_utc - timedelta(days=1):
-                continue
-            if until_utc is not None and mtime > until_utc + timedelta(days=1):
+            if mtime < since_utc - timedelta(days=1):
                 continue
 
         try:
