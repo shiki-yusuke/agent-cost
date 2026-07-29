@@ -1,9 +1,14 @@
 {
   "schema_version": "1",
-  "catalog_version": "2026-07-01",
+  "catalog_version": "2026-07-29",
   "currency": "USD",
   "unit": "per_mtok",
   "usd_per_credit": "0.04",
+  "notes": [
+    "All Claude rates are standard (non-batch, non-priority) API prices. Batch API is roughly 50% off, but agent-cost's logs have no signal for whether a given request went through Batch, so batch usage is priced at standard rates and will overstate cost for anyone using Batch.",
+    "claude-opus-5's launch date could not be confirmed from an authoritative source as of this catalog_version; its rate period's effective_from (2026-07-01) is a placeholder -- update it once confirmed.",
+    "gpt-5.6 (sol/terra/luna) is intentionally left out of this catalog: no authoritative rate card could be confirmed at the time of writing (see README Limitations). Add it via a custom --rates file once confirmed, rather than relying on unverified third-party figures."
+  ],
   "sources": [
     {
       "url": "https://platform.claude.com/docs/en/pricing",
@@ -21,8 +26,8 @@
       "fast_multiplier": "1.0",
       "rates": [
         {
-          "rate_id": "claude-fable-5-2026",
-          "effective_from": "2025-01-01T00:00:00+00:00",
+          "rate_id": "claude-fable-5-launch-2026-06-09",
+          "effective_from": "2026-06-09T00:00:00+00:00",
           "effective_until": null,
           "input_nocache": "10.0",
           "cache_read": "1.00",
@@ -38,8 +43,8 @@
       "fast_multiplier": "1.0",
       "rates": [
         {
-          "rate_id": "claude-mythos-5-2026",
-          "effective_from": "2025-01-01T00:00:00+00:00",
+          "rate_id": "claude-mythos-5-launch-2026-06-09",
+          "effective_from": "2026-06-09T00:00:00+00:00",
           "effective_until": null,
           "input_nocache": "10.0",
           "cache_read": "1.00",
@@ -52,11 +57,28 @@
     {
       "model_key": "claude-opus-4-8",
       "aliases": [],
-      "fast_multiplier": "1.0",
+      "fast_multiplier": "2.0",
       "rates": [
         {
-          "rate_id": "claude-opus-4-8-2026",
-          "effective_from": "2025-01-01T00:00:00+00:00",
+          "rate_id": "claude-opus-4-8-launch-2026-05-28",
+          "effective_from": "2026-05-28T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "5.0",
+          "cache_read": "0.50",
+          "cache_write_5m": "6.25",
+          "cache_write_1h": "10.0",
+          "output": "25.0"
+        }
+      ]
+    },
+    {
+      "model_key": "claude-opus-5",
+      "aliases": [],
+      "fast_multiplier": "2.0",
+      "rates": [
+        {
+          "rate_id": "claude-opus-5-launch-date-unconfirmed",
+          "effective_from": "2026-07-01T00:00:00+00:00",
           "effective_until": null,
           "input_nocache": "5.0",
           "cache_read": "0.50",
@@ -124,7 +146,7 @@
       "rates": [
         {
           "rate_id": "claude-sonnet-5-launch-promo",
-          "effective_from": "2026-01-01T00:00:00+00:00",
+          "effective_from": "2026-06-30T00:00:00+00:00",
           "effective_until": "2026-09-01T00:00:00+00:00",
           "input_nocache": "2.0",
           "cache_read": "0.20",
@@ -242,7 +264,7 @@
         "cache_read": "1.875",
         "cache_write_5m": null,
         "cache_write_1h": null,
-        "output": "113.0"
+        "output": "112.5"
       },
       "rates": [
         {
@@ -253,7 +275,7 @@
           "cache_read": "0.075",
           "cache_write_5m": null,
           "cache_write_1h": null,
-          "output": "4.52"
+          "output": "4.50"
         }
       ]
     },

@@ -109,6 +109,84 @@ def test_rates_show_model(capsys):
     assert "claude-opus-4-8" in out
 
 
+def test_report_json_schema_is_locked(tmp_path, monkeypatch, capsys):
+    """Pins the report JSON's shape so a future change to it is deliberate."""
+    claude_home, _codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [
+            _assistant_event("2026-06-01T00:00:00Z", "claude-opus-4-8", 1_000_000, 0),
+            # Unknown model -> unpriced row.
+            _assistant_event("2026-06-01T00:01:00Z", "totally-unknown-model-xyz", 500, 0),
+            # cache_creation with no TTL breakdown -> cache_write_unknown -> lower_bound row.
+            {
+                "type": "assistant",
+                "timestamp": "2026-06-01T00:02:00Z",
+                "sessionId": "s1",
+                "message": {
+                    "model": "claude-opus-4-8",
+                    "usage": {"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 1_000_000},
+                },
+            },
+        ],
+    )
+
+    rc = cli.main(["report", "--format", "json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert set(payload.keys()) == {
+        "schema_version",
+        "generated_at",
+        "window",
+        "timezone",
+        "rates",
+        "group_by",
+        "data_quality",
+        "rows",
+    }
+    assert payload["schema_version"] == "1"
+    assert set(payload["window"].keys()) == {"since", "until"}
+    assert set(payload["rates"].keys()) == {"catalog_version", "sha256"}
+    assert set(payload["data_quality"].keys()) == {
+        "malformed_events",
+        "skipped_files",
+        "negative_deltas",
+        "unpriced_tokens",
+    }
+
+    row_columns = {
+        "month",
+        "agent",
+        "model",
+        "token_kind",
+        "tokens",
+        "priced_tokens",
+        "unpriced_tokens",
+        "estimated_cost_usd",
+        "credits",
+        "pricing_status",
+    }
+    assert len(payload["rows"]) > 0
+    for row in payload["rows"]:
+        assert set(row.keys()) == row_columns
+        assert row["pricing_status"] in ("priced", "lower_bound", "unpriced")
+
+    by_model = {r["model"]: r for r in payload["rows"] if r["token_kind"] == "input_nocache"}
+    unpriced_row = by_model["totally-unknown-model-xyz"]
+    assert unpriced_row["pricing_status"] == "unpriced"
+    assert unpriced_row["estimated_cost_usd"] == 0.0
+    assert unpriced_row["unpriced_tokens"] == unpriced_row["tokens"] == 500
+    assert payload["data_quality"]["unpriced_tokens"] == 500
+
+    lower_bound_rows = [r for r in payload["rows"] if r["token_kind"] == "cache_write_unknown"]
+    assert len(lower_bound_rows) == 1
+    assert lower_bound_rows[0]["pricing_status"] == "lower_bound"
+    assert lower_bound_rows[0]["estimated_cost_usd"] > 0.0
+
+
 def test_export_jsonl(tmp_path, monkeypatch, capsys):
     claude_home, _codex_home = _setup_env(tmp_path, monkeypatch)
     _write_claude_session(
@@ -125,6 +203,9 @@ def test_export_jsonl(tmp_path, monkeypatch, capsys):
     record = json.loads(lines[0])
     assert record["agent"] == "claude"
     assert record["model_key"] == "claude-opus-4-8"
+    assert record["source_quality"] == "ok"
+    for line in lines:
+        assert json.loads(line)["source_quality"] is not None
     # Privacy: no absolute paths, prompts, or branch names in export.
     assert "cwd" not in record
     assert "jsonl_path" not in record

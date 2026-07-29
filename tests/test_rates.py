@@ -47,6 +47,36 @@ def test_sonnet_5_historical_switch_before_and_after_cutover():
     assert still_standard.values["input_nocache"] == Decimal("3.0")
 
 
+def test_claude_opus_5_is_priced_with_fast_multiplier_2x():
+    catalog = load_rates()
+    entry = catalog.models["claude-opus-5"]
+    assert entry.fast_multiplier == Decimal("2.0")
+    _, period = catalog.rate_for("claude-opus-5", dt("2026-07-15T00:00:00+00:00"))
+    assert period.values["input_nocache"] == Decimal("5.0")
+    assert period.values["output"] == Decimal("25.0")
+
+
+def test_claude_opus_4_8_fast_multiplier_2x():
+    catalog = load_rates()
+    assert catalog.models["claude-opus-4-8"].fast_multiplier == Decimal("2.0")
+
+
+def test_gpt_5_4_mini_output_rate_is_4_50():
+    catalog = load_rates()
+    _, period = catalog.rate_for("gpt-5.4-mini", dt("2026-07-15T00:00:00+00:00"))
+    assert period.values["output"] == Decimal("4.50")
+
+
+def test_gpt_5_6_sol_not_in_packaged_catalog():
+    # No authoritative rate card could be confirmed at the time of writing;
+    # left out (unresolvable / unpriced) rather than guessed from
+    # unverified third-party sources -- see rates.json's "notes".
+    catalog = load_rates()
+    resolved, period = catalog.rate_for("gpt-5.6-sol", dt("2026-07-15T00:00:00+00:00"))
+    assert resolved is None
+    assert period is None
+
+
 def test_alias_resolution():
     catalog = load_rates()
     resolved, period = catalog.rate_for("gpt-5.5-codex", dt("2026-07-15T00:00:00+00:00"))
@@ -147,6 +177,50 @@ def test_negative_rate_value_raises(tmp_path):
     path = tmp_path / "rates.json"
     path.write_text(__import__("json").dumps(data))
     with pytest.raises(RatesValidationError, match=">= 0"):
+        load_rates(path)
+
+
+def test_unsupported_schema_version_raises(tmp_path):
+    data = _minimal_catalog(
+        [{"model_key": "m1", "aliases": [], "rates": [_rate("r1", "2025-01-01T00:00:00+00:00")]}]
+    )
+    data["schema_version"] = "2"
+    path = tmp_path / "rates.json"
+    path.write_text(__import__("json").dumps(data))
+    with pytest.raises(RatesValidationError, match="schema_version"):
+        load_rates(path)
+
+
+def test_unsupported_currency_raises(tmp_path):
+    data = _minimal_catalog(
+        [{"model_key": "m1", "aliases": [], "rates": [_rate("r1", "2025-01-01T00:00:00+00:00")]}]
+    )
+    data["currency"] = "JPY"
+    path = tmp_path / "rates.json"
+    path.write_text(__import__("json").dumps(data))
+    with pytest.raises(RatesValidationError, match="currency"):
+        load_rates(path)
+
+
+def test_unsupported_unit_raises(tmp_path):
+    data = _minimal_catalog(
+        [{"model_key": "m1", "aliases": [], "rates": [_rate("r1", "2025-01-01T00:00:00+00:00")]}]
+    )
+    data["unit"] = "per_token"
+    path = tmp_path / "rates.json"
+    path.write_text(__import__("json").dumps(data))
+    with pytest.raises(RatesValidationError, match="unit"):
+        load_rates(path)
+
+
+def test_missing_schema_version_raises(tmp_path):
+    data = _minimal_catalog(
+        [{"model_key": "m1", "aliases": [], "rates": [_rate("r1", "2025-01-01T00:00:00+00:00")]}]
+    )
+    del data["schema_version"]
+    path = tmp_path / "rates.json"
+    path.write_text(__import__("json").dumps(data))
+    with pytest.raises(RatesValidationError, match="schema_version"):
         load_rates(path)
 
 

@@ -26,6 +26,15 @@ RATE_FIELDS = (
     "output",
 )
 
+# The only schema_version/currency/unit values this version of agent-cost
+# knows how to interpret. A catalog claiming anything else is rejected
+# outright rather than silently treated as USD-per-mtok -- a catalog in a
+# different currency or unit priced as if it were USD-per-mtok would be
+# wrong by a fixed, silent factor.
+SUPPORTED_SCHEMA_VERSIONS = ("1",)
+SUPPORTED_CURRENCIES = ("USD",)
+SUPPORTED_UNITS = ("per_mtok",)
+
 
 class RatesValidationError(ValueError):
     """The rates catalog failed structural or business-rule validation."""
@@ -191,12 +200,26 @@ def _validate_and_build(data: dict) -> RateCatalog:
     if not isinstance(data, dict):
         raise RatesValidationError("rates catalog root must be an object")
 
-    schema_version = data.get("schema_version")
     catalog_version = data.get("catalog_version")
     if not catalog_version:
         raise RatesValidationError("missing catalog_version")
-    currency = data.get("currency", "USD")
-    unit = data.get("unit", "per_mtok")
+
+    schema_version = data.get("schema_version")
+    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+        raise RatesValidationError(
+            f"unsupported schema_version: {schema_version!r} (supported: {SUPPORTED_SCHEMA_VERSIONS})"
+        )
+
+    currency = data.get("currency")
+    if currency not in SUPPORTED_CURRENCIES:
+        raise RatesValidationError(
+            f"unsupported currency: {currency!r} (supported: {SUPPORTED_CURRENCIES})"
+        )
+
+    unit = data.get("unit")
+    if unit not in SUPPORTED_UNITS:
+        raise RatesValidationError(f"unsupported unit: {unit!r} (supported: {SUPPORTED_UNITS})")
+
     usd_per_credit = _parse_decimal(data.get("usd_per_credit"), field_name="usd_per_credit")
     if usd_per_credit is None:
         usd_per_credit = Decimal("0")
