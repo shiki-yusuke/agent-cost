@@ -46,7 +46,15 @@ network, never calls `gh`, and never resolves branches or PRs.
   turn; agent-cost turns that into per-turn deltas. Codex does not expose a
   separate cache-write signal at all, so cache writes are never reported for
   Codex (not zero -- simply not observable, and left out of the row rather
-  than implied).
+  than implied). Codex's `output` fact is `output_tokens` alone: cross-checking
+  real rollout files confirms `total_tokens == input_tokens + output_tokens`
+  in every sample, which means `reasoning_output_tokens` is a breakdown of
+  output tokens already counted, not an additional charge -- adding it in
+  would double it.
+- **Anthropic prices are standard (non-batch) API list prices.** The Batch
+  API is roughly 50% cheaper, but agent-cost's logs carry no signal for
+  whether a request went through Batch, so all Claude usage is priced at
+  standard rates; this overstates cost for anyone using Batch.
 - **Cost is always an estimate.** The output field is `estimated_cost_usd`,
   never `cost_usd`: it is a list-price calculation from token counts, not a
   bill. For Codex, whose provider bills in credits, the row also carries a
@@ -62,6 +70,14 @@ network, never calls `gh`, and never resolves branches or PRs.
   counters that go backwards (e.g. after a session reset) are all counted
   in the report's `data_quality` block instead of being silently dropped or
   clamped to zero.
+- **Known catalog gaps**, tracked in `agent_cost/rates.json`'s `notes`:
+  `claude-opus-5`'s launch date could not be confirmed from an authoritative
+  source, so its rate period's `effective_from` is a placeholder; and
+  `gpt-5.6` (Sol/Terra/Luna) is left out entirely because no authoritative
+  Codex rate card could be confirmed at the time of writing -- usage of
+  those models reports as `unpriced` rather than guessed from unverified
+  third-party figures. Add either via a custom `--rates` file once you have
+  a confirmed number.
 
 ## Updating the rate catalog
 
@@ -116,3 +132,11 @@ MIT. See [LICENSE](LICENSE).
   `--rates PATH` で別カタログに完全差し替えできます。
 - 破損したログ行、読めなくなったファイル、Codex の累積カウンタが逆行するケースなどは、すべて
   `data_quality` に件数として記録し、黙って丸めたり捨てたりしません。
+- Codex の `output` は `output_tokens` のみです。実 rollout データを突合した結果
+  `total_tokens == input_tokens + output_tokens` が常に成立することを確認しており、
+  `reasoning_output_tokens` は output の内訳（二重計上してはいけない）と判断しています。
+- Anthropic の単価は標準（非 Batch）API 価格です。Batch API は約50%安いですが、ログからは
+  Batch 利用かどうか判別できないため、常に標準単価で推計します（Batch 利用者には過大推計）。
+- `claude-opus-5` のローンチ日と `gpt-5.6`（sol/terra/luna）の単価は根拠を確認できなかったため、
+  前者はプレースホルダの `effective_from`、後者はカタログ未収録（unpriced）としています
+  （詳細は `rates.json` の `notes`）。
