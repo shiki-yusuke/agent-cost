@@ -72,12 +72,14 @@ network, never calls `gh`, and never resolves branches or PRs.
   clamped to zero.
 - **Known catalog gaps**, tracked in `agent_cost/rates.json`'s `notes`:
   `claude-opus-5`'s launch date could not be confirmed from an authoritative
-  source, so its rate period's `effective_from` is a placeholder; and
-  `gpt-5.6` (Sol/Terra/Luna) is left out entirely because no authoritative
-  Codex rate card could be confirmed at the time of writing -- usage of
-  those models reports as `unpriced` rather than guessed from unverified
-  third-party figures. Add either via a custom `--rates` file once you have
-  a confirmed number.
+  source, so its rate period's `effective_from` is a placeholder. `gpt-5.6`
+  (Sol/Terra/Luna) credits could not be confirmed from the primary source
+  (`help.openai.com`'s Codex rate card returns HTTP 403 to automated
+  fetches); the values in the catalog come from several independent
+  secondary sources that agree with each other and are internally
+  consistent with `usd_per_credit`, but are not primary-source-verified --
+  re-check them once the rate card is reachable. Update either via a
+  custom `--rates` file if you have a confirmed number.
 
 ## Updating the rate catalog
 
@@ -107,8 +109,11 @@ can be traced back to the prices that produced it.
 
 agent-cost makes zero network calls. `agent-cost export`'s JSONL never
 includes absolute file paths, rollout paths, prompt/message content, or git
-branch names -- only the fields needed to reproduce a cost estimate
-(timestamp, agent, session id, model, token kind, token count, mode).
+branch names -- only the fields needed to reproduce a cost estimate:
+`occurred_at_utc`, `agent`, `session_id`, `model_raw`, `model_key`,
+`token_kind`, `tokens`, `mode`, and `source_quality` (a fixed-vocabulary
+caveat about how that one fact was derived, e.g. `"ok"` or Codex's
+`"first_event_delta"` -- never null).
 
 ## License
 
@@ -137,6 +142,7 @@ MIT. See [LICENSE](LICENSE).
   `reasoning_output_tokens` は output の内訳（二重計上してはいけない）と判断しています。
 - Anthropic の単価は標準（非 Batch）API 価格です。Batch API は約50%安いですが、ログからは
   Batch 利用かどうか判別できないため、常に標準単価で推計します（Batch 利用者には過大推計）。
-- `claude-opus-5` のローンチ日と `gpt-5.6`（sol/terra/luna）の単価は根拠を確認できなかったため、
-  前者はプレースホルダの `effective_from`、後者はカタログ未収録（unpriced）としています
-  （詳細は `rates.json` の `notes`）。
+- `claude-opus-5` のローンチ日は根拠を確認できず `effective_from` はプレースホルダです。
+  `gpt-5.6`（sol/terra/luna）は一次情報（help.openai.com の rate card）が 403 で取得できなかったため、
+  相互に整合する複数の二次情報源の値を採用しています（一次情報での裏取りは未完了、詳細は
+  `rates.json` の `notes`）。
