@@ -1,4 +1,6 @@
 import json
+import sqlite3
+from datetime import datetime, timezone
 
 from agent_cost import cli
 
@@ -16,6 +18,55 @@ def _assistant_event(ts, model, input_tokens, output_tokens, session_id="s1"):
         "timestamp": ts,
         "sessionId": session_id,
         "message": {"model": model, "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}},
+    }
+
+
+_CODEX_THREADS_SCHEMA = """
+CREATE TABLE threads (
+    id TEXT PRIMARY KEY,
+    model TEXT,
+    rollout_path TEXT,
+    tokens_used INTEGER,
+    created_at_ms INTEGER,
+    archived INTEGER DEFAULT 0
+)
+"""
+
+
+def _write_codex_thread(codex_home, *, thread_id, model, rollout_events, tokens_used, created_at_ms):
+    rollout_path = codex_home / f"{thread_id}.jsonl"
+    rollout_path.write_text("\n".join(json.dumps(e) for e in rollout_events) + "\n")
+    db_path = codex_home / "state_5.sqlite"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        if not conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='threads'"
+        ).fetchone():
+            conn.executescript(_CODEX_THREADS_SCHEMA)
+        conn.execute(
+            "INSERT INTO threads (id, model, rollout_path, tokens_used, created_at_ms) VALUES (?, ?, ?, ?, ?)",
+            (thread_id, model, str(rollout_path), tokens_used, created_at_ms),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _token_count_event(ts, *, input_tokens, cached_input_tokens=0, output_tokens=0):
+    return {
+        "type": "event_msg",
+        "timestamp": ts,
+        "payload": {
+            "type": "token_count",
+            "info": {
+                "total_token_usage": {
+                    "input_tokens": input_tokens,
+                    "cached_input_tokens": cached_input_tokens,
+                    "output_tokens": output_tokens,
+                    "reasoning_output_tokens": 0,
+                }
+            },
+        },
     }
 
 
@@ -85,6 +136,48 @@ def test_report_since_until_filters_window(tmp_path, monkeypatch, capsys):
     payload = json.loads(capsys.readouterr().out)
     total_tokens = sum(r["tokens"] for r in payload["rows"])
     assert total_tokens == 200
+
+
+def test_report_cli_includes_codex_thread_created_before_window(tmp_path, monkeypatch, capsys):
+    # Regression (real report/export path, not just the reader unit test):
+    # a Codex thread created well before the window must still contribute
+    # its in-window usage -- threads.created_at_ms must never hard-filter
+    # it out.
+    _claude_home, codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_codex_thread(
+        codex_home,
+        thread_id="t1",
+        model="gpt-5.5",
+        rollout_events=[_token_count_event("2026-06-15T00:00:00Z", input_tokens=1000, output_tokens=200)],
+        tokens_used=1200,
+        created_at_ms=0,  # long before the window below
+    )
+    rc = cli.main(
+        ["report", "--format", "json", "--agent", "codex", "--since", "2026-06-01", "--until", "2026-07-01"]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert sum(r["tokens"] for r in payload["rows"]) == 1200
+
+
+def test_export_cli_includes_claude_file_modified_after_until(tmp_path, monkeypatch, capsys):
+    # Regression (real export path): a session file's mtime reflects its
+    # *last* write, which can be well after `until`, but an earlier
+    # in-window event in that same file must still be exported.
+    claude_home, _codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [_assistant_event("2026-06-10T00:00:00Z", "claude-opus-4-8", 42, 7)],
+    )
+    # The file's real mtime ("now") is after `until` below.
+    rc = cli.main(
+        ["export", "--agent", "claude", "--since", "2026-06-01", "--until", "2026-06-15"]
+    )
+    assert rc == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert sum(json.loads(line)["tokens"] for line in lines) == 49
 
 
 def test_doctor_runs(tmp_path, monkeypatch, capsys):

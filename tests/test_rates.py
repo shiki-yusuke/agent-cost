@@ -47,6 +47,34 @@ def test_sonnet_5_historical_switch_before_and_after_cutover():
     assert still_standard.values["input_nocache"] == Decimal("3.0")
 
 
+def test_claude_fable_5_before_launch_date_is_unpriced():
+    catalog = load_rates()
+    resolved, before = catalog.rate_for("claude-fable-5", dt("2026-06-08T23:59:59+00:00"))
+    assert resolved == "claude-fable-5"
+    assert before is None  # no rate period covers before the 2026-06-09 launch
+    _, after = catalog.rate_for("claude-fable-5", dt("2026-06-09T00:00:00+00:00"))
+    assert after is not None
+
+
+def test_claude_opus_4_8_before_launch_date_is_unpriced():
+    catalog = load_rates()
+    resolved, before = catalog.rate_for("claude-opus-4-8", dt("2026-05-27T23:59:59+00:00"))
+    assert resolved == "claude-opus-4-8"
+    assert before is None  # no rate period covers before the 2026-05-28 launch
+    _, after = catalog.rate_for("claude-opus-4-8", dt("2026-05-28T00:00:00+00:00"))
+    assert after is not None
+
+
+def test_claude_sonnet_5_before_promo_launch_is_unpriced():
+    catalog = load_rates()
+    resolved, before = catalog.rate_for("claude-sonnet-5", dt("2026-06-29T23:59:59+00:00"))
+    assert resolved == "claude-sonnet-5"
+    assert before is None  # no rate period predates the 2026-06-30 promo launch
+    _, at_launch = catalog.rate_for("claude-sonnet-5", dt("2026-06-30T00:00:00+00:00"))
+    assert at_launch is not None
+    assert at_launch.values["input_nocache"] == Decimal("2.0")
+
+
 def test_claude_opus_5_is_priced_with_fast_multiplier_2x():
     catalog = load_rates()
     entry = catalog.models["claude-opus-5"]
@@ -67,14 +95,24 @@ def test_gpt_5_4_mini_output_rate_is_4_50():
     assert period.values["output"] == Decimal("4.50")
 
 
-def test_gpt_5_6_sol_not_in_packaged_catalog():
-    # No authoritative rate card could be confirmed at the time of writing;
-    # left out (unresolvable / unpriced) rather than guessed from
-    # unverified third-party sources -- see rates.json's "notes".
+def test_gpt_5_6_family_credits_and_usd_are_internally_consistent():
+    # The primary source (help.openai.com's rate card) could not be
+    # reached; these credits are cross-checked secondary-source values
+    # (see rates.json's "notes"), consistent with usd_per_credit=0.04.
     catalog = load_rates()
-    resolved, period = catalog.rate_for("gpt-5.6-sol", dt("2026-07-15T00:00:00+00:00"))
-    assert resolved is None
-    assert period is None
+    for model_key, input_credits, output_credits in (
+        ("gpt-5.6-sol", Decimal("125.0"), Decimal("750.0")),
+        ("gpt-5.6-terra", Decimal("62.5"), Decimal("375.0")),
+        ("gpt-5.6-luna", Decimal("25.0"), Decimal("150.0")),
+    ):
+        entry = catalog.models[model_key]
+        assert entry.credits_per_mtok["input_nocache"] == input_credits
+        assert entry.credits_per_mtok["output"] == output_credits
+        _, period = catalog.rate_for(model_key, dt("2026-07-15T00:00:00+00:00"))
+        assert period is not None
+        assert period.values["input_nocache"] == input_credits * catalog.usd_per_credit
+        assert period.values["output"] == output_credits * catalog.usd_per_credit
+        assert period.values["cache_write_5m"] is None  # OpenAI has no cache-write charge
 
 
 def test_alias_resolution():
