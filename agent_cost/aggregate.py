@@ -178,3 +178,24 @@ def build_rows(
         key=lambda r: (r.month or "", r.agent or "", r.model or "", r.token_kind or ""),
     )
     return rows, DataQuality(unpriced_tokens=unpriced_tokens_total)
+
+
+def rows_totals(rows: Iterable[Row]) -> dict:
+    """Sum a set of rows into a single scalar totals dict.
+
+    Sums the underlying Decimal cost/credits fields (not their float
+    conversions) so precision isn't lost across many rows before
+    converting to float once at the end, for callers (like ``measure``)
+    that need one aggregate number across rows that were grouped by
+    dimensions they don't care about.
+    """
+    rows = list(rows)
+    estimated_cost_usd = sum((r.estimated_cost_usd for r in rows), Decimal("0"))
+    credits = sum((r.credits for r in rows), Decimal("0"))
+    return {
+        "tokens": sum(r.tokens for r in rows),
+        "priced_tokens": sum(r.priced_tokens for r in rows),
+        "unpriced_tokens": sum(r.unpriced_tokens for r in rows),
+        "estimated_cost_usd": float(estimated_cost_usd),
+        "credits": float(credits),
+    }

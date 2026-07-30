@@ -303,3 +303,214 @@ def test_export_jsonl(tmp_path, monkeypatch, capsys):
     assert "cwd" not in record
     assert "jsonl_path" not in record
     assert "branch" not in record
+
+
+# ── measure ──
+
+
+def test_measure_requires_at_least_one_session_id(capsys):
+    rc = cli.main(["measure", "--format", "json"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "session-id" in err
+
+
+def test_measure_invalid_timezone_is_input_error(capsys):
+    rc = cli.main(["measure", "--session-id", "s1", "--timezone", "Not/AZone"])
+    assert rc == 2
+
+
+def test_measure_invalid_since_is_input_error(capsys):
+    rc = cli.main(["measure", "--session-id", "s1", "--since", "not-a-date"])
+    assert rc == 2
+
+
+def test_measure_invalid_rates_path_is_input_error(tmp_path, capsys):
+    bad_rates = tmp_path / "bad.json"
+    bad_rates.write_text("{}")
+    rc = cli.main(["measure", "--session-id", "s1", "--rates", str(bad_rates)])
+    assert rc == 2
+
+
+def test_measure_unknown_session_id_exits_zero_with_empty_result(tmp_path, monkeypatch, capsys):
+    _setup_env(tmp_path, monkeypatch)
+    rc = cli.main(["measure", "--session-id", "no-such-session"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["session_ids"] == ["no-such-session"]
+    session = payload["sessions"]["no-such-session"]
+    assert session["matched"] is False
+    assert session["rows"] == []
+    assert session["totals"] == {
+        "tokens": 0,
+        "priced_tokens": 0,
+        "unpriced_tokens": 0,
+        "estimated_cost_usd": 0.0,
+        "credits": 0.0,
+    }
+    assert payload["total"]["totals"]["tokens"] == 0
+    assert payload["data_quality"]["source_quality"] == {"ok": 0, "first_event_delta": 0}
+
+
+def test_measure_multiple_sessions_claude_and_codex_mixed(tmp_path, monkeypatch, capsys):
+    claude_home, codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [_assistant_event("2026-07-15T00:00:00Z", "claude-opus-4-8", 1_000_000, 0, session_id="session-a")],
+    )
+    _write_codex_thread(
+        codex_home,
+        thread_id="session-b",
+        model="gpt-5.5",
+        rollout_events=[_token_count_event("2026-07-15T00:00:00Z", input_tokens=1_000_000, output_tokens=0)],
+        tokens_used=1_000_000,
+        created_at_ms=0,
+    )
+
+    rc = cli.main(
+        [
+            "measure",
+            "--session-id",
+            "session-a",
+            "--session-id",
+            "session-b",
+            "--format",
+            "json",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["protocol_version"] == "measure/v1"
+    assert payload["session_ids"] == ["session-a", "session-b"]
+
+    session_a = payload["sessions"]["session-a"]
+    assert session_a["matched"] is True
+    assert session_a["totals"]["tokens"] == 1_000_000
+    assert session_a["totals"]["estimated_cost_usd"] == 5.0
+    assert all(r["agent"] == "claude" for r in session_a["rows"])
+
+    session_b = payload["sessions"]["session-b"]
+    assert session_b["matched"] is True
+    assert session_b["totals"]["tokens"] == 1_000_000
+    assert session_b["totals"]["estimated_cost_usd"] == 5.0
+    assert session_b["totals"]["credits"] == 125.0
+    assert all(r["agent"] == "codex" for r in session_b["rows"])
+
+    # total is the union of both requested sessions, not a global report.
+    assert payload["total"]["totals"]["tokens"] == 2_000_000
+    assert payload["total"]["totals"]["estimated_cost_usd"] == 10.0
+    assert set(r["agent"] for r in payload["total"]["rows"]) == {"claude", "codex"}
+
+    # measure never groups by month -- every row's "month" key is null.
+    for row in session_a["rows"] + session_b["rows"] + payload["total"]["rows"]:
+        assert row["month"] is None
+
+
+def test_measure_agent_filter_excludes_other_agents_session(tmp_path, monkeypatch, capsys):
+    claude_home, codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [_assistant_event("2026-06-01T00:00:00Z", "claude-opus-4-8", 100, 0, session_id="session-a")],
+    )
+    _write_codex_thread(
+        codex_home,
+        thread_id="session-b",
+        model="gpt-5.5",
+        rollout_events=[_token_count_event("2026-06-01T00:00:00Z", input_tokens=100, output_tokens=0)],
+        tokens_used=100,
+        created_at_ms=0,
+    )
+    rc = cli.main(
+        [
+            "measure",
+            "--session-id",
+            "session-a",
+            "--session-id",
+            "session-b",
+            "--agent",
+            "claude",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["sessions"]["session-a"]["matched"] is True
+    assert payload["sessions"]["session-b"]["matched"] is False
+
+
+def test_measure_unpriced_model_reflected_in_data_quality(tmp_path, monkeypatch, capsys):
+    claude_home, _codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [_assistant_event("2026-06-01T00:00:00Z", "totally-unknown-model", 500, 0, session_id="session-a")],
+    )
+    rc = cli.main(["measure", "--session-id", "session-a"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    session = payload["sessions"]["session-a"]
+    assert session["matched"] is True
+    assert session["rows"][0]["pricing_status"] == "unpriced"
+    assert session["totals"]["unpriced_tokens"] == 500
+    assert payload["data_quality"]["unpriced_tokens"] == 500
+
+
+def test_measure_source_quality_breakdown_scoped_to_requested_sessions(tmp_path, monkeypatch, capsys):
+    # A codex thread NOT among the requested session_ids must not leak into
+    # the source_quality breakdown -- it's scoped to what was asked for.
+    claude_home, codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_codex_thread(
+        codex_home,
+        thread_id="requested-session",
+        model="gpt-5.5",
+        rollout_events=[_token_count_event("2026-06-01T00:00:00Z", input_tokens=100, output_tokens=0)],
+        tokens_used=100,
+        created_at_ms=0,
+    )
+    _write_codex_thread(
+        codex_home,
+        thread_id="other-session",
+        model="gpt-5.5",
+        rollout_events=[_token_count_event("2026-06-01T00:00:00Z", input_tokens=999, output_tokens=0)],
+        tokens_used=999,
+        created_at_ms=0,
+    )
+    rc = cli.main(["measure", "--session-id", "requested-session", "--agent", "codex"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    # Both codex threads' first delta is "first_event_delta"; only the
+    # requested one should be counted.
+    assert payload["data_quality"]["source_quality"]["first_event_delta"] == 1
+    assert payload["total"]["totals"]["tokens"] == 100
+
+
+def test_measure_window_filters_session_facts(tmp_path, monkeypatch, capsys):
+    claude_home, _codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [
+            _assistant_event("2026-05-01T00:00:00Z", "claude-opus-4-8", 100, 0, session_id="session-a"),
+            _assistant_event("2026-06-15T00:00:00Z", "claude-opus-4-8", 200, 0, session_id="session-a"),
+        ],
+    )
+    rc = cli.main(
+        [
+            "measure",
+            "--session-id",
+            "session-a",
+            "--since",
+            "2026-06-01",
+            "--until",
+            "2026-07-01",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["sessions"]["session-a"]["totals"]["tokens"] == 200

@@ -30,6 +30,10 @@ interpreted in `--timezone`, default UTC), `--agent claude,codex`,
 `--group-by month,agent,model,token-kind`, `--rates PATH` (use a different
 catalog entirely, see below), `--exclude-archived` (Codex threads).
 
+If another program wants to parse agent-cost's output for one or more
+specific session ids, see `agent-cost measure` below rather than
+scraping `report`.
+
 ## What this measures, and what it doesn't
 
 agent-cost only reads data that is already on disk. It never talks to the
@@ -105,6 +109,64 @@ agent-cost rates validate path/to/rates.json
 `catalog_version` and the sha256 of the exact rates file used, so a report
 can be traced back to the prices that produced it.
 
+## Machine consumption: `agent-cost measure`
+
+`report` is for a person reading a table. `measure` is for another program
+calling agent-cost as a subprocess and parsing its stdout -- e.g. a build
+orchestrator attributing cost to a specific unit of work it already knows
+the session id(s) for.
+
+```bash
+agent-cost measure --session-id <id> [--session-id <id> ...] \
+  [--since --until --timezone] [--agent claude,codex] [--rates PATH] --format json
+```
+
+- One or more `--session-id` is required (repeat the flag for more than
+  one); `measure` never scans "everything," only the sessions you name.
+- Exit code is `0` on success -- including when none of the given session
+  ids matched any usage at all, which is a valid, representable answer
+  (empty totals, `"matched": false` per session), not a failure. Exit code
+  `2` means bad input (no `--session-id`, an unparseable `--since`/
+  `--until`/`--timezone`, or an invalid `--rates` catalog) -- nothing was
+  measured, don't trust any partial output.
+- Output is one JSON object on stdout with a `protocol_version` field
+  (currently `"measure/v1"`) a caller should check before trusting the
+  shape below. Within a major version, only additive changes (new fields)
+  are made; a field being removed or changing meaning bumps the version.
+
+```json
+{
+  "protocol_version": "measure/v1",
+  "generated_at": "...",
+  "window": { "since": "...", "until": null },
+  "timezone": "UTC",
+  "agent": ["claude", "codex"],
+  "rates": { "catalog_version": "2026-07-29", "sha256": "..." },
+  "session_ids": ["sess-1", "sess-2"],
+  "sessions": {
+    "sess-1": { "matched": true, "rows": [ /* same row shape as report --format json */ ], "totals": { "tokens": 12345, "priced_tokens": 12345, "unpriced_tokens": 0, "estimated_cost_usd": 0.42, "credits": 0.0 } },
+    "sess-2": { "matched": false, "rows": [], "totals": { "tokens": 0, "priced_tokens": 0, "unpriced_tokens": 0, "estimated_cost_usd": 0.0, "credits": 0.0 } }
+  },
+  "total": { "rows": [ /* union across every requested session_id */ ], "totals": { "...": "..." } },
+  "data_quality": {
+    "malformed_events": 0,
+    "skipped_files": 0,
+    "negative_deltas": 0,
+    "unpriced_tokens": 0,
+    "source_quality": { "ok": 41, "first_event_delta": 2 }
+  }
+}
+```
+
+Rows are grouped by agent/model/token-kind only -- `measure` never buckets
+by month, since a query is already scoped to specific sessions. `total` is
+the union of every requested `session_id` (not a global report), so it's
+the number to attribute to whatever unit of work those sessions represent.
+`data_quality.unpriced_tokens` and `.source_quality` are scoped to the
+requested sessions; `.malformed_events`/`.skipped_files`/`.negative_deltas`
+describe the health of the underlying log read within `--since`/`--until`
+and are not attributable to one session.
+
 ## Privacy
 
 agent-cost makes zero network calls. `agent-cost export`'s JSONL never
@@ -135,6 +197,10 @@ MIT. See [LICENSE](LICENSE).
   未知のモデル・単価表にない token 種別は `unpriced` として扱い、憶測の価格を出しません。
 - 単価表 (`agent_cost/rates.json`) は履歴型カタログで、値上げは新しい期間として追加します。
   `--rates PATH` で別カタログに完全差し替えできます。
+- `agent-cost measure --session-id ID [--session-id ID ...] --format json` は他プログラムから
+  subprocess で叩くための機械可読な契約です（`protocol_version: "measure/v1"`）。指定した
+  session_id が1件も見つからなくても終了コードは0（空集計として表現）、`--session-id` 未指定など
+  の入力エラーのみ終了コード2です。
 - 破損したログ行、読めなくなったファイル、Codex の累積カウンタが逆行するケースなどは、すべて
   `data_quality` に件数として記録し、黙って丸めたり捨てたりしません。
 - Codex の `output` は `output_tokens` のみです。実 rollout データを突合した結果
