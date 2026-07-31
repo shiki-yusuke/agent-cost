@@ -138,6 +138,98 @@ def test_report_since_until_filters_window(tmp_path, monkeypatch, capsys):
     assert total_tokens == 200
 
 
+def test_report_since_until_accept_z_suffix(tmp_path, monkeypatch, capsys):
+    # JavaScript's Date.toISOString() always emits a trailing "Z"; a
+    # JS-based caller (e.g. lane's TelemetryAdapter) must not be rejected
+    # for using it.
+    claude_home, _codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [
+            _assistant_event("2026-05-01T00:00:00Z", "claude-opus-4-8", 100, 0),
+            _assistant_event("2026-06-15T00:00:00Z", "claude-opus-4-8", 200, 0),
+        ],
+    )
+    rc = cli.main(
+        [
+            "report",
+            "--format",
+            "json",
+            "--since",
+            "2026-06-01T00:00:00Z",
+            "--until",
+            "2026-07-01T00:00:00Z",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert sum(r["tokens"] for r in payload["rows"]) == 200
+    assert payload["window"]["since"] == "2026-06-01T00:00:00+00:00"
+    assert payload["window"]["until"] == "2026-07-01T00:00:00+00:00"
+
+
+def test_z_suffix_and_plus_00_00_are_the_same_instant(tmp_path, monkeypatch, capsys):
+    claude_home, _codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [_assistant_event("2026-06-15T00:00:00Z", "claude-opus-4-8", 100, 0)],
+    )
+    rc_z = cli.main(["report", "--format", "json", "--since", "2026-06-15T00:00:00Z"])
+    payload_z = json.loads(capsys.readouterr().out)
+    rc_offset = cli.main(["report", "--format", "json", "--since", "2026-06-15T00:00:00+00:00"])
+    payload_offset = json.loads(capsys.readouterr().out)
+    assert rc_z == 0 and rc_offset == 0
+    assert payload_z["window"]["since"] == payload_offset["window"]["since"]
+    assert sum(r["tokens"] for r in payload_z["rows"]) == sum(r["tokens"] for r in payload_offset["rows"])
+
+
+def test_export_since_accepts_z_suffix(tmp_path, monkeypatch, capsys):
+    claude_home, _codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [_assistant_event("2026-06-15T00:00:00Z", "claude-opus-4-8", 10, 5)],
+    )
+    rc = cli.main(["export", "--agent", "claude", "--since", "2026-06-01T00:00:00Z"])
+    assert rc == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert len(lines) == 2
+
+
+def test_since_z_suffix_date_only_still_uses_timezone(tmp_path, monkeypatch, capsys):
+    # Date-only input (no "Z", no offset) must keep being interpreted in
+    # --timezone -- this fix only teaches fromisoformat about "Z", it must
+    # not change date-only handling.
+    claude_home, _codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [_assistant_event("2026-05-31T16:00:00Z", "claude-opus-4-8", 100, 0)],  # 2026-06-01 01:00 JST
+    )
+    rc = cli.main(
+        ["report", "--format", "json", "--since", "2026-06-01", "--timezone", "Asia/Tokyo"]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert sum(r["tokens"] for r in payload["rows"]) == 100
+
+
+def test_invalid_since_still_rejected_after_z_suffix_fix(tmp_path, monkeypatch):
+    _setup_env(tmp_path, monkeypatch)
+    try:
+        cli.main(["report", "--since", "not-a-date"])
+        raised = False
+    except SystemExit:
+        raised = True
+    assert raised  # unchanged pre-existing behavior for report/export
+
+
 def test_report_cli_includes_codex_thread_created_before_window(tmp_path, monkeypatch, capsys):
     # Regression (real report/export path, not just the reader unit test):
     # a Codex thread created well before the window must still contribute
@@ -514,3 +606,33 @@ def test_measure_window_filters_session_facts(tmp_path, monkeypatch, capsys):
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["sessions"]["session-a"]["totals"]["tokens"] == 200
+
+
+def test_measure_since_until_accept_z_suffix(tmp_path, monkeypatch, capsys):
+    # A JS caller (Date.toISOString()) always emits a "Z" suffix.
+    claude_home, _codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [
+            _assistant_event("2026-05-01T00:00:00Z", "claude-opus-4-8", 100, 0, session_id="session-a"),
+            _assistant_event("2026-06-15T00:00:00Z", "claude-opus-4-8", 200, 0, session_id="session-a"),
+        ],
+    )
+    rc = cli.main(
+        [
+            "measure",
+            "--session-id",
+            "session-a",
+            "--since",
+            "2026-06-01T00:00:00Z",
+            "--until",
+            "2026-07-01T00:00:00Z",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["sessions"]["session-a"]["totals"]["tokens"] == 200
+    assert payload["window"]["since"] == "2026-06-01T00:00:00+00:00"
+    assert payload["window"]["until"] == "2026-07-01T00:00:00+00:00"

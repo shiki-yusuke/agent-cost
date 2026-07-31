@@ -29,8 +29,13 @@ MEASURE_PROTOCOL_VERSION = "measure/v1"
 def _parse_window_bound(value: Optional[str], tz: ZoneInfo) -> Optional[datetime]:
     if not value:
         return None
+    # Python 3.9-3.10's datetime.fromisoformat() rejects the "Z" (Zulu/UTC)
+    # suffix that ISO 8601 allows and that, e.g., JavaScript's
+    # Date.toISOString() always emits -- normalize it to the equivalent
+    # "+00:00" offset fromisoformat does accept, before parsing.
+    text = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
-        dt = datetime.fromisoformat(value)
+        dt = datetime.fromisoformat(text)
     except ValueError as exc:
         raise SystemExit(f"[error] invalid date/time: {value!r} ({exc})")
     if dt.tzinfo is not None:

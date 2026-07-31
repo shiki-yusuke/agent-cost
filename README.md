@@ -123,6 +123,11 @@ agent-cost measure --session-id <id> [--session-id <id> ...] \
 
 - One or more `--session-id` is required (repeat the flag for more than
   one); `measure` never scans "everything," only the sessions you name.
+- `--since`/`--until` accept a date-only value (interpreted in
+  `--timezone`), an offset-qualified ISO 8601 datetime (`+00:00`, `+09:00`,
+  ...), or the same datetime with a trailing `Z` instead of an offset
+  (`2026-07-31T00:00:00Z`, exactly what `Date.toISOString()` in JS emits)
+  -- all three are accepted by `report`/`export`/`measure` alike.
 - Exit code is `0` on success -- including when none of the given session
   ids matched any usage at all, which is a valid, representable answer
   (empty totals, `"matched": false` per session), not a failure. Exit code
