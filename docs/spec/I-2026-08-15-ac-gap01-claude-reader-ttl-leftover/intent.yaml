@@ -1,0 +1,55 @@
+schema_version: "1.0"
+intent_id: I-2026-08-15-ac-gap01-claude-reader-ttl-leftover
+execution_mode: manual
+budget: []
+intent:
+  business_goal: 計測の正確性を支える cache_write 分解ロジックの回帰検知を可能にする
+  user_visible_intent: Claude reader の部分TTL leftover 分岐（cache_creation_input_tokens
+    の内訳合計が全量に満たない場合に差分を cache_write_unknown として計上する分岐）の回帰テスト追加
+  success:
+    - "内訳合計 < cache_creation_input_tokens のとき leftover が cache_write_unknown として計上されることを検証するテストが存在する"
+    - "cache_creation の内訳情報が全く無いとき全量が cache_write_unknown になることを検証するテスト（既存カバレッジ含む）が存在する"
+    - "内訳合計 = cache_creation_input_tokens のとき cache_write_unknown が計上されない（leftover 0）ことを検証するテスト（既存カバレッジ含む）が存在する"
+    - "pytest が全 green である"
+    - "agent_cost/** の実装コードは変更していない"
+  non_goal:
+    - "agent_cost/readers/claude.py のロジック自体を修正すること（バグを見つけても本タスクでは直さず報告のみ）"
+    - "GAP-02 など gaps.yaml の他項目に対応すること"
+  constraints:
+    - "テスト追加のみ。agent_cost/** は原則変更しない"
+    - "実装のバグを発見した場合は修正せず、現行挙動を固定するテストとして書いた上で報告に明記する"
+    - "コミットメッセージに AC-GAP-01 を含める"
+  primary_user: agent-cost メンテナ
+  state_segments: []
+  known_affected_behavior:
+    - "agent_cost/readers/claude.py#parse_session_facts の cache_creation dict 分岐（leftover 計算、行104-112付近）"
+  declared_risk: low
+premise_evidence:
+  required: true
+  method: code-only
+  reproduced: true
+  evidence: >-
+    docs/claims/gaps.yaml の GAP-01 が指す agent_cost/readers/claude.py#parse_session_facts
+    （leftover = cache_creation_input_tokens - (ephemeral_5m + ephemeral_1h);
+    leftover > 0 のとき cache_write_unknown を追加計上、行104-112）を実読して分岐の実在を確認した。
+    さらに tests/test_reader_claude.py を grep したところ、既存テストは
+    test_cache_creation_ttl_breakdown_present（内訳合計が全量と厳密一致、leftover=0）と
+    test_cache_creation_without_ttl_breakdown_is_unknown（cache_creation dict 自体が無く全量 unknown）
+    の2ケースのみで、「dict はあるが内訳合計 < 全量」という leftover>0 の部分一致ケースを
+    検証するテストは存在しないことを確認した。GAP-01 の記述と実装・テストの現状は一致しており、
+    ギャップは実在する。
+ai_inferred_scope:
+  affected_layers:
+    - test
+  related_files:
+    - agent_cost/readers/claude.py
+    - tests/test_reader_claude.py
+    - docs/claims/gaps.yaml
+  required_docs: []
+  confidence: high
+  open_questions: []
+  allowed_paths:
+    - "tests/**"
+    - "docs/spec/I-2026-08-15-ac-gap01-claude-reader-ttl-leftover/**"
+  forbidden_paths:
+    - "agent_cost/**"
