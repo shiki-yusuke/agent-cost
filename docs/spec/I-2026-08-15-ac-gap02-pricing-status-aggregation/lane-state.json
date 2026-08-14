@@ -1,0 +1,96 @@
+{
+  "schema_version": "3.0",
+  "intent_id": "I-2026-08-15-ac-gap02-pricing-status-aggregation",
+  "tracker_url": null,
+  "pr_url": null,
+  "pr_provenance": null,
+  "owner": null,
+  "current_phase": "4_verify",
+  "status": "running",
+  "created_at": "2026-08-14T16:33:27.923Z",
+  "updated_at": "2026-08-14T16:41:33.122Z",
+  "phase_history": [
+    {
+      "phase": "1_intent",
+      "started_at": "2026-08-14T16:33:27.923Z",
+      "ended_at": "2026-08-14T16:41:32.811Z",
+      "result": "completed",
+      "retry_count": 0
+    },
+    {
+      "phase": "2_spec",
+      "started_at": "2026-08-14T16:41:32.811Z",
+      "ended_at": "2026-08-14T16:41:32.888Z",
+      "result": "completed",
+      "retry_count": 0
+    },
+    {
+      "phase": "3_implement",
+      "started_at": "2026-08-14T16:41:32.888Z",
+      "result": "completed",
+      "retry_count": 0,
+      "ended_at": "2026-08-14T16:41:33.122Z"
+    },
+    {
+      "phase": "4_verify",
+      "started_at": "2026-08-14T16:41:33.122Z",
+      "result": "in_progress",
+      "retry_count": 0
+    }
+  ],
+  "halt_info": null,
+  "retry_log": [],
+  "effective_risk_log": [
+    {
+      "gate_id": "phase_advance",
+      "effective_risk": "low",
+      "applied_rule_ids": [],
+      "profile_digest": "de411a77b8159c655c26db767b4fa6cff13f0e0fee7b90413c4ef9027708df16",
+      "evaluated_at": "2026-08-14T16:41:32.811Z"
+    },
+    {
+      "gate_id": "phase_advance",
+      "effective_risk": "low",
+      "applied_rule_ids": [],
+      "profile_digest": "de411a77b8159c655c26db767b4fa6cff13f0e0fee7b90413c4ef9027708df16",
+      "evaluated_at": "2026-08-14T16:41:32.888Z"
+    },
+    {
+      "gate_id": "phase_advance",
+      "effective_risk": "low",
+      "applied_rule_ids": [],
+      "profile_digest": "de411a77b8159c655c26db767b4fa6cff13f0e0fee7b90413c4ef9027708df16",
+      "evaluated_at": "2026-08-14T16:41:33.122Z"
+    }
+  ],
+  "mode_resolution_log": [],
+  "cost_ledger": [
+    {
+      "ledger_entry_id": "lc_d42b86cf33e6",
+      "lane_id": "I-2026-08-15-ac-gap02-pricing-status-aggregation",
+      "source": "claude_jsonl_auto",
+      "session_ids": [
+        "2cd0d09e-84a0-4ddc-a0ff-11e641bd4767"
+      ],
+      "data_state": "has_usage",
+      "confidence": "imported_windowed",
+      "included_in_kpi": true,
+      "tokens": 3062857,
+      "turns": null,
+      "cost_usd": 1.4437574,
+      "cost_credits": 0,
+      "pricing_version": "2026-07-29",
+      "pricing_as_of": "2026-08-14T16:40:08.060204+00:00",
+      "imported_at": "2026-08-14T16:39:46.350Z",
+      "since": "2026-08-14T16:33:28.010Z",
+      "until": "2026-08-14T16:39:46.350Z",
+      "agents": [
+        "claude"
+      ],
+      "scope": "phase",
+      "phase": "1_intent"
+    }
+  ],
+  "usage_import_attempts": [],
+  "usage_import_gate_overrides": []
+}
