@@ -1,9 +1,10 @@
 Source: ai-agent-skills-playbook, docs/protocols/measure-v1.md + contracts/measure/v1/
-Vendored commit: 2f94ddc209248816f9759e7c80122d7957a94729 (branch feat/measure-v1-contract --
+Vendored commit: d919cce6f29f87ff2e7f143d4759e2a07a7e624b (branch feat/measure-v1-contract --
 this contract and its playbook-side companion change land as sibling PRs across
 ai-agent-skills-playbook / agent-cost / spec-lane for issue #51; update this pin to the
 merged main-branch commit once that PR lands)
-Vendored at: 2026-08-14
+Vendored at: 2026-08-14 (re-vendored: sol review round -- required-floor policy correction,
+matched:false/dimensional-total semantic checks, open token_kind, 3 new reject fixtures)
 Vendored into: tests/fixtures/measure-v1-contract/
   (measure-output.schema.json, fixtures/*.json -- byte-for-byte copies, no local modification)
 
@@ -11,7 +12,7 @@ Fixture tree hash (sha256 over `find . -type f | sort` each file's path+content,
 reproducible via: `find tests/fixtures/measure-v1-contract -type f | sort |
 xargs -I{} sh -c 'echo "{}"; cat "{}"' | shasum -a 256`):
 
-  c7686e0b6d31794f5701fbad9adf28fef984df114d986c4bbb1dc8bca46068f8
+  48d7e152cb8f2f783dc7303fa80b5f5b439ec8f414ebf4d71f555c21aa12903d
 
 Re-vendoring: if the playbook's contract changes, re-copy the same files from that commit,
 recompute the tree hash with the command above, and update both the commit reference and the
