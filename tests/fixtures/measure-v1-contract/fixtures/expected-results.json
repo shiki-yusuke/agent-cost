@@ -1,0 +1,49 @@
+{
+  "protocol_version": "measure/v1",
+  "fixture_format_version": "1",
+  "description": "Machine-readable expected outcome for every fixture in this directory. `verify-fixtures.mjs` reads this file and fails (non-zero exit) if any fixture's actual outcome does not match. Every fixture here is a full `measure --format json` payload (not a sub-object), because measure/v1 is a single flat contract with no independently-identity-bearing sub-records (unlike trace/v1's events or attribution/v1's binding-records). `reason_code` for a \"reject\" fixture is either a named semantic-check code (e.g. \"row_tokens_sum_mismatch\") or a raw schema-validator JSON-path (e.g. \"$.protocol_version\"), same leading-token convention as agent-metrics/v1, trace/v1, attribution/v1 and estimate/v2. `all_forbidden_keys_flagged: true` on a fixture entry means: instead of checking a single `reason_code`, verify that every key in contracts/shared/personal-dimensions.mjs's forbidden set is individually flagged. Every fixture in this directory was produced (accept fixtures verbatim, reject fixtures as a single deliberate mutation of an accept fixture) by actually running `agent-cost measure --format json` against a local agent-cost checkout, not hand-authored from a description of the intended shape -- see docs/protocols/measure-v1.md.",
+  "fixtures": [
+    {
+      "id": "accept-matched-normal",
+      "files": { "record": "accept-matched-normal.json" },
+      "expected": "accept",
+      "reason_code": null,
+      "notes": "One requested session_id, fully priced usage (claude-opus-4-8, input_nocache + output), matched: true. The ordinary case."
+    },
+    {
+      "id": "accept-matched-false",
+      "files": { "record": "accept-matched-false.json" },
+      "expected": "accept",
+      "reason_code": null,
+      "notes": "A requested session_id with no matching usage anywhere still gets a well-formed entry in `sessions` (matched: false, empty rows, all-zero totals) -- measure exits 0, not an error, for this case (agent_cost/cli.py's own docstring: 'the case where none of the requested session ids matched anything' is success, not failure)."
+    },
+    {
+      "id": "accept-unpriced-lower-bound-mixed",
+      "files": { "record": "accept-unpriced-lower-bound-mixed.json" },
+      "expected": "accept",
+      "reason_code": null,
+      "notes": "One matched session with two rows: a cache_write_unknown row priced as a lower_bound (agent_cost/aggregate.py prices an unresolvable cache-write TTL at the cheaper 5-minute rate and flags it, never at the more expensive 1-hour rate as a guess), and an unpriced row for a model absent from the rates catalog. Exercises both non-\"priced\" pricing_status values in one payload, plus data_quality.unpriced_tokens > 0."
+    },
+    {
+      "id": "invalid-protocol-version",
+      "files": { "record": "invalid-protocol-version.json" },
+      "expected": "reject",
+      "reason_code": "$.protocol_version",
+      "notes": "protocol_version is \"measure/v0\" instead of the required literal \"measure/v1\" -- a consumer that doesn't check this before trusting the shape (agent_cost/cli.py's own MEASURE_PROTOCOL_VERSION comment: 'Consumers ... should check this before trusting the shape of the payload') could misparse a future breaking version."
+    },
+    {
+      "id": "invalid-totals-missing-key",
+      "files": { "record": "invalid-totals-missing-key.json" },
+      "expected": "reject",
+      "reason_code": "$.total.totals",
+      "notes": "total.totals is missing its \"credits\" key -- rows_totals() always emits exactly 5 keys as the current documented minimum. Caught by `required`, which this schema enforces in full even though it does not set additionalProperties:false anywhere (see the schema's own description) -- an open schema still checks for every documented field, it only stops short of forbidding undocumented extra ones."
+    },
+    {
+      "id": "invalid-personal-dimension",
+      "files": { "record": "invalid-personal-dimension.json" },
+      "expected": "reject",
+      "all_forbidden_keys_flagged": true,
+      "notes": "All 11 forbidden personal-dimension keys planted at once (as extra top-level properties). measure/v1 carries no per-actor identity anywhere in its real shape (it is a pure token/cost digest keyed only by session_id, itself an opaque identifier, not a person) -- this fixture proves the scan actually flags every one of the 11 keys individually, not just whichever single key an ordinary fixture happens to test. Unlike this repo's other (closed-schema) contracts, this is NOT also caught by additionalProperties:false -- measure/v1's schema is deliberately open (see the schema's own description), so the personal-dimension scan is the only thing standing between this payload and a false accept, which is exactly why it is checked unconditionally, not only as defense-in-depth."
+    }
+  ]
+}
