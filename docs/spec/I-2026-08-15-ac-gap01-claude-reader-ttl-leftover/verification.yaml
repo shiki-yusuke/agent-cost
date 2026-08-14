@@ -15,7 +15,12 @@ spec_consensus:
   spec_digest: 0217af3a7caadc5cd8277252897d1753e208f67b48dcf9040e13565f3687325f
   verification_digest: dc52cca315d893fffcdde607938c704ecc655e439128bd3dc3219525d5a3961b
   deviations: []
-  reviewer_ack: null
+  reviewer_ack:
+    reviewer_kind: independent_agent
+    reviewer_id: claude-fable-main
+    acked_at: 2026-08-14T16:40:41.784Z
+    spec_sha256: 0217af3a7caadc5cd8277252897d1753e208f67b48dcf9040e13565f3687325f
+    verification_sha256: dc52cca315d893fffcdde607938c704ecc655e439128bd3dc3219525d5a3961b
 success_criteria_matrix:
   - criterion: 内訳合計 < cache_creation_input_tokens のとき leftover が cache_write_unknown
       として計上されることを検証するテストが存在する
