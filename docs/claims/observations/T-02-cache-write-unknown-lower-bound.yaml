@@ -1,0 +1,155 @@
+topic_id: T-02
+observations:
+  - observation_id: OBS-004
+    topic_id: T-02
+    claim_kind: behavior
+    statement: >-
+      parse_session_facts emits cache_write_5m/cache_write_1h facts when a
+      Claude Code event's usage.cache_creation dict is present and its two
+      ephemeral counters sum to the event's cache_creation_input_tokens
+      exactly; when usage.cache_creation is absent entirely, the whole
+      cache_creation_input_tokens count is instead emitted as a single
+      cache_write_unknown fact. (The tested cases only cover a full TTL
+      breakdown that exactly accounts for the total, and no breakdown at
+      all -- see this topic's gap record for the partial-breakdown case the
+      code also handles but no test exercises.)
+    origin: reconstructed
+    epistemic_status: execution_verified
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - parse_session_facts
+    provenance:
+      - source_kind: test
+        uri: tests/test_reader_claude.py
+        selector: test_cache_creation_ttl_breakdown_present
+        content_digest: "c0c3f7ad4be7e9757b8b4d29e789a1febb31370f0fc2d678111519bfc635d8df"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: test
+        uri: tests/test_reader_claude.py
+        selector: test_cache_creation_without_ttl_breakdown_is_unknown
+        content_digest: "c0c3f7ad4be7e9757b8b4d29e789a1febb31370f0fc2d678111519bfc635d8df"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: source
+        uri: agent_cost/readers/claude.py
+        selector: parse_session_facts
+        content_digest: "7b7520d1baee18545fbfa174f2c9ef09ad5a6eee4a840a3722b00fb40e830e8f"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-source
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - agent_cost/readers/claude.py
+
+  - observation_id: OBS-005
+    topic_id: T-02
+    claim_kind: behavior
+    statement: >-
+      price_fact() prices a cache_write_unknown fact by substituting the
+      cache_write_5m rate field (never cache_write_1h, the more expensive
+      one) and setting pricing_status to "lower_bound" rather than
+      "priced", so a caller can tell "priced normally" apart from "priced
+      as an explicit floor because the TTL was unknown".
+    origin: reconstructed
+    epistemic_status: execution_verified
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - price_fact
+    provenance:
+      - source_kind: test
+        uri: tests/test_aggregate.py
+        selector: test_price_fact_cache_write_unknown_is_lower_bound
+        content_digest: "4fa19557fb67f561bd959564173e7f05ba63205d1871683f11d9ff521956b34a"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: source
+        uri: agent_cost/aggregate.py
+        selector: price_fact
+        content_digest: "a2d26673aa9122f441c92c4d1fe7662bfa6dceda98a862ae7136114f45a8cb8c"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-source
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - agent_cost/aggregate.py
+
+  - observation_id: OBS-006
+    topic_id: T-02
+    claim_kind: decision_record
+    statement: >-
+      Pricing an unknown-TTL cache write at the 5-minute rate as an
+      explicit lower bound -- instead of guessing the more expensive
+      1-hour rate, or averaging the two -- is a deliberate design decision,
+      recorded in both price_fact's own docstring and the README's "What
+      this measures" section, so a reader of the output number knows it is
+      a floor, not a best-effort midpoint.
+    origin: recorded
+    epistemic_status: recorded_decision
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - price_fact
+    provenance:
+      - source_kind: source
+        uri: agent_cost/aggregate.py
+        selector: price_fact (module docstring)
+        content_digest: "a2d26673aa9122f441c92c4d1fe7662bfa6dceda98a862ae7136114f45a8cb8c"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-source
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: spec
+        uri: README.md
+        selector: "## What this measures, and what it doesn't"
+        content_digest: "6b3236a0d35fcae635a102cf2e6dc6d5776002fe78354877d157f94a4e6f27f6"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-source
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - agent_cost/aggregate.py
+      - README.md
+
+  - observation_id: OBS-007
+    topic_id: T-02
+    claim_kind: behavior
+    statement: >-
+      The Codex CLI reader (parse_rollout_facts) never emits a
+      cache_write_5m, cache_write_1h, or cache_write_unknown fact for any
+      event -- it only ever constructs Fact objects with token_kind
+      "input_nocache", "cache_read", or "output". This matches the README's
+      claim that Codex exposes no cache-write signal at all, but is
+      recorded here from a direct, single-pass static read of the reader
+      module rather than from a test that asserts the negative (no test in
+      tests/test_reader_codex.py checks that "cache_write" never appears
+      in a fact's token_kind).
+    origin: reconstructed
+    epistemic_status: single_source_observation
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - parse_rollout_facts
+    provenance:
+      - source_kind: source
+        uri: agent_cost/readers/codex.py
+        selector: parse_rollout_facts
+        content_digest: "010ba51f52092ad01f1effd88f0ba084467b609dae4469ce41c797a1f080109b"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-source
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - agent_cost/readers/codex.py

@@ -1,0 +1,15 @@
+topic_id: T-01
+title: rates.json catalog structural validation rules
+description: >-
+  What `agent_cost.rates.load_rates()` rejects outright when loading a rate
+  catalog (unsupported schema_version/currency/unit, duplicate model_key,
+  colliding/duplicate aliases, overlapping rate periods for the same model,
+  negative rate values) versus what it accepts, before any pricing decision
+  is made.
+representative_symbols:
+  - load_rates
+  - _validate_and_build
+  - _build_model_entry
+representative_paths:
+  - agent_cost/rates.py
+related_topics: [T-02, T-04]

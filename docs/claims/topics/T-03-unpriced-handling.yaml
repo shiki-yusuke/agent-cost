@@ -1,0 +1,14 @@
+topic_id: T-03
+title: unpriced fact/row handling (never guessing a price)
+description: >-
+  How agent-cost handles a fact it has no rate for -- an unrecognized
+  model_key, or a token kind a known model's rate period doesn't define --
+  and how that "unpriced" status propagates from a single fact up to a
+  grouped row and the top-level data_quality block, without ever inventing
+  a cost number.
+representative_symbols:
+  - price_fact
+  - build_rows
+representative_paths:
+  - agent_cost/aggregate.py
+related_topics: [T-01, T-02]

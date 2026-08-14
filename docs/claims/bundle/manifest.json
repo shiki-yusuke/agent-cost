@@ -1,0 +1,31 @@
+{
+  "corpus_digest": "4e9373970f7d72c8d8a0a2329f11baf13e0cd12467041228f2b8fca0549780a3",
+  "counts": {
+    "by_claim_kind": {
+      "behavior": 8,
+      "constraint": 2,
+      "decision_record": 3,
+      "invariant": 4
+    },
+    "by_conformance_status": {
+      "matched": 17
+    },
+    "by_epistemic_status": {
+      "execution_verified": 12,
+      "recorded_decision": 3,
+      "single_source_observation": 2
+    },
+    "by_origin": {
+      "reconstructed": 14,
+      "recorded": 3
+    },
+    "observations": 17,
+    "topics": 5
+  },
+  "generated_at": "2026-08-15T00:00:00Z",
+  "generator": {
+    "name": "evidence-docs",
+    "version": "0.1.0"
+  },
+  "repo_commit": "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+}
