@@ -1,0 +1,57 @@
+schema_version: "1.0"
+intent_id: I-2026-08-15-agent-cost-claims-corpus
+test_matrix:
+  - ears_rule: R3 (再現性)
+    test_type: manual
+    status: existing
+    note: evidence-docs validate/generate を子セッションと main が独立実行し、corpus_digest
+      一致・byte-identical を双方で確認
+test_gaps: []
+manual_verification:
+  - id: independent-validate
+    description: main セッションが独立に validate + generate を実行し、corpus_digest 4e937397... の一致を確認
+    expected_status: 一致（確認済み）
+goal_stopping_condition:
+  - success_criteria_matrix の全行が covered_by none 以外
+spec_consensus:
+  spec_ssot_ref: docs/spec/I-2026-08-15-agent-cost-claims-corpus/spec.md
+  spec_digest: 97160203f1a3af760eed012f141e3d26d4e01beb815d51cd67cedb7f4c7b91cb
+  verification_digest: b67eef03a2d548235be9a6de9d65229d383441a47c60488d430f8eb1b1bf95e6
+  deviations: []
+  reviewer_ack:
+    reviewer_kind: independent_agent
+    reviewer_id: claude-fable-main
+    acked_at: 2026-08-14T16:16:02.071Z
+    spec_sha256: 97160203f1a3af760eed012f141e3d26d4e01beb815d51cd67cedb7f4c7b91cb
+    verification_sha256: b67eef03a2d548235be9a6de9d65229d383441a47c60488d430f8eb1b1bf95e6
+success_criteria_matrix:
+  - criterion: docs/claims/ に evidence-docs 形式の Claim Corpus（topics
+      3-5件・observations 12-18件）を作成し、agent-cost の pricing 系（rates.json
+      検証規則・cache_write_unknown の lower_bound 意味論・unpriced の扱い・Decimal
+      使用・measure/v1 契約）のみを対象とする
+    covered_by: diff
+    evidence: topics 5 / observations 17（manifest.json）。対象は pricing 系のみ（topics 一覧で確認）
+    negation_test: 範囲外ドメイン（reader/renderer 等）の topic が混入していれば topics 一覧レビューで検出される
+  - criterion: HEAD commit を repo-commit として evidence-docs validate/generate
+      がエラーなく完走し、generate を2回実行した site/ と bundle/ が byte-identical であることを確認している
+    covered_by: manual
+    evidence: 子セッション2回 + main 独立実行で corpus_digest 4e9373970f7d... 一致、diff -rq 差分なし
+    negation_test: observation を1バイト変えれば corpus_digest が変わる（digest 感度は evidence-docs
+      本体のテストで担保）
+  - criterion: evidence-docs context の実行例（--query
+      '{"seeds":{"paths":["agent_cost/rates.py"]},"token_budget":4000}'）を
+      docs/claims/README.md に記録している
+    covered_by: diff
+    evidence: docs/claims/README.md の context 節
+    negation_test: README から該当節を消せばこの行の evidence が指す先が消える
+  - criterion: drift 探索を最低1回真剣に実施し、結果（検出した内容、または「探索したが未検出」）を gaps.yaml に正直に記録している
+    covered_by: diff
+    evidence: gaps.yaml GAP-03（未検出の正直記録）+ GAP-01/02（発見した実テストギャップ2件）
+    negation_test: gaps.yaml が空なら探索未実施として検出される
+  - criterion: agent_cost/** および tests/** の実装コードは一切変更されていない（docs/claims/** のみ追加）
+    covered_by: diff
+    evidence: git diff --stat main..HEAD が docs/ 配下のみ
+    negation_test: 実装ファイルが diff に現れれば即検出
+cross_check_intent_vs_spec:
+  performed_at: 2026-08-15 (Phase 3→4)
+  finding: intent.success 5行 ↔ matrix 5行を1対1突合、過不足なし
