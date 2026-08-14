@@ -1,5 +1,10 @@
 # agent-cost
 
+> PyPI distribution: [`coding-agent-cost`](https://pypi.org/project/coding-agent-cost/) — the
+> command (`agent-cost`) and import name (`agent_cost`) are unchanged. The name `agent-cost`
+> itself is blocked by PyPI's name-similarity rule against `agentcost`, an unrelated project
+> by a different author; this tool is not affiliated with it.
+
 Estimate how many tokens Claude Code and Codex CLI actually used, and roughly
 what that cost, by reading the local logs those tools already write to your
 machine.
@@ -7,7 +12,7 @@ machine.
 ## Quick start
 
 ```bash
-pip install -e .          # or: pip install agent-cost once published
+pip install coding-agent-cost   # or, from a checkout: pip install -e .
 agent-cost doctor         # sanity-check log locations and the rate catalog
 agent-cost report
 ```
