@@ -159,3 +159,65 @@ def test_build_rows_mixed_priced_and_unpriced_marks_row_unpriced():
     assert rows[0].pricing_status == "unpriced"
     assert rows[0].priced_tokens == 100
     assert rows[0].unpriced_tokens == 50
+
+
+def test_build_rows_all_priced_facts_mark_row_priced():
+    # AC-GAP-02: baseline for the ranking -- a row built only from
+    # normally-priced facts (no lower_bound, no unpriced) stays "priced".
+    catalog = load_rates()
+    facts = [
+        _fact(model_key="claude-opus-4-8", tokens=100),
+        _fact(model_key="claude-opus-4-8", token_kind="output", tokens=50),
+    ]
+    rows, _ = build_rows(facts, catalog, group_by=("agent",))
+    assert rows[0].pricing_status == "priced"
+
+
+def test_build_rows_mixed_priced_and_lower_bound_marks_row_lower_bound():
+    # AC-GAP-02: the half of the _STATUS_RANK ordering that
+    # tests/test_aggregate.py had no coverage for -- a row built from a
+    # plain priced fact and a lower_bound fact (cache_write_unknown) in
+    # the same group-by bucket must be downgraded to "lower_bound", not
+    # left at "priced".
+    catalog = load_rates()
+    facts = [
+        _fact(model_key="claude-opus-4-8", token_kind="input_nocache", tokens=100),
+        _fact(model_key="claude-opus-4-8", token_kind="cache_write_unknown", tokens=50),
+    ]
+    rows, _ = build_rows(facts, catalog, group_by=("agent",))
+    assert rows[0].pricing_status == "lower_bound"
+    assert rows[0].priced_tokens == 150
+    assert rows[0].unpriced_tokens == 0
+
+
+def test_build_rows_mixed_lower_bound_and_unpriced_marks_row_unpriced():
+    # AC-GAP-02: unpriced outranks (is worse than) lower_bound, so a row
+    # mixing a lower_bound fact with an unpriced one ends up "unpriced".
+    catalog = load_rates()
+    facts = [
+        _fact(model_key="claude-opus-4-8", token_kind="cache_write_unknown", tokens=100),
+        _fact(model_key="unknown-model", tokens=50),
+    ]
+    rows, _ = build_rows(facts, catalog, group_by=("agent",))
+    assert rows[0].pricing_status == "unpriced"
+    assert rows[0].priced_tokens == 100
+    assert rows[0].unpriced_tokens == 50
+
+
+def test_build_rows_worst_status_ranking_is_order_independent():
+    # AC-GAP-02: the row's pricing_status is the worst status among its
+    # facts regardless of the order the facts were built in -- build_rows
+    # only ever downgrades (never upgrades) a row's status as it iterates,
+    # so any permutation of the same three facts must land on "unpriced".
+    catalog = load_rates()
+    priced = _fact(model_key="claude-opus-4-8", token_kind="input_nocache", tokens=100)
+    lower_bound = _fact(model_key="claude-opus-4-8", token_kind="cache_write_unknown", tokens=50)
+    unpriced = _fact(model_key="unknown-model", tokens=25)
+
+    for facts in (
+        [priced, lower_bound, unpriced],
+        [unpriced, lower_bound, priced],
+        [lower_bound, priced, unpriced],
+    ):
+        rows, _ = build_rows(facts, catalog, group_by=("agent",))
+        assert rows[0].pricing_status == "unpriced"
