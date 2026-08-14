@@ -1,0 +1,37 @@
+schema_version: "1.0"
+# Stable ID ledger for this corpus. topic_id / observation_id must never
+# change meaning once minted (tools and external references key off them).
+# `evidence-docs validate`/`generate` reject any topic_id/observation_id
+# used in topics/ or observations/ that isn't registered here first, and
+# any ID registered here that is never defined.
+#
+# Workflow:
+# - mint a new topic/observation here before writing its file
+# - never reuse or renumber an existing ID once minted
+# - to retire an ID, do not delete the entry -- future tooling can add a
+#   `status: retired` convention here if that becomes necessary
+minted_at_default: "2026-08-15"
+topics:
+  T-01: { slug: pricing-catalog-validation-rules, minted_at: "2026-08-15" }
+  T-02: { slug: cache-write-unknown-lower-bound, minted_at: "2026-08-15" }
+  T-03: { slug: unpriced-handling, minted_at: "2026-08-15" }
+  T-04: { slug: decimal-arithmetic-for-money, minted_at: "2026-08-15" }
+  T-05: { slug: measure-v1-contract-ownership, minted_at: "2026-08-15" }
+observations:
+  OBS-001: { topic_id: T-01, minted_at: "2026-08-15" }
+  OBS-002: { topic_id: T-01, minted_at: "2026-08-15" }
+  OBS-003: { topic_id: T-01, minted_at: "2026-08-15" }
+  OBS-004: { topic_id: T-02, minted_at: "2026-08-15" }
+  OBS-005: { topic_id: T-02, minted_at: "2026-08-15" }
+  OBS-006: { topic_id: T-02, minted_at: "2026-08-15" }
+  OBS-007: { topic_id: T-02, minted_at: "2026-08-15" }
+  OBS-008: { topic_id: T-03, minted_at: "2026-08-15" }
+  OBS-009: { topic_id: T-03, minted_at: "2026-08-15" }
+  OBS-010: { topic_id: T-03, minted_at: "2026-08-15" }
+  OBS-011: { topic_id: T-03, minted_at: "2026-08-15" }
+  OBS-012: { topic_id: T-04, minted_at: "2026-08-15" }
+  OBS-013: { topic_id: T-04, minted_at: "2026-08-15" }
+  OBS-014: { topic_id: T-04, minted_at: "2026-08-15" }
+  OBS-015: { topic_id: T-05, minted_at: "2026-08-15" }
+  OBS-016: { topic_id: T-05, minted_at: "2026-08-15" }
+  OBS-017: { topic_id: T-05, minted_at: "2026-08-15" }

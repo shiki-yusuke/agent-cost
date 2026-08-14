@@ -1,0 +1,142 @@
+topic_id: T-01
+observations:
+  - observation_id: OBS-001
+    topic_id: T-01
+    claim_kind: constraint
+    statement: >-
+      load_rates() rejects a catalog outright (raising RatesValidationError)
+      if schema_version is not "1", currency is not "USD", or unit is not
+      "per_mtok" -- these are closed allow-lists (SUPPORTED_SCHEMA_VERSIONS /
+      SUPPORTED_CURRENCIES / SUPPORTED_UNITS), not warnings, so a catalog in
+      an unexpected unit/currency can never be silently priced as if it were
+      USD-per-mtok.
+    origin: reconstructed
+    epistemic_status: execution_verified
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - load_rates
+      - _validate_and_build
+    provenance:
+      - source_kind: test
+        uri: tests/test_rates.py
+        selector: test_unsupported_schema_version_raises
+        content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: test
+        uri: tests/test_rates.py
+        selector: test_unsupported_currency_raises
+        content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: test
+        uri: tests/test_rates.py
+        selector: test_unsupported_unit_raises
+        content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: source
+        uri: agent_cost/rates.py
+        selector: _validate_and_build
+        content_digest: "d725baf8709df0732327aae58d8226dd943e3f2813d07ab361b740c02649d5ed"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-source
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - agent_cost/rates.py
+
+  - observation_id: OBS-002
+    topic_id: T-01
+    claim_kind: invariant
+    statement: >-
+      A catalog is rejected at load time if two models share the same
+      model_key, if one model's alias equals another model's own model_key
+      (alias/model_key namespaces cannot collide), or if the same alias
+      string is registered under two different models -- all three are
+      structural invariants of _build_model_entry/_validate_and_build's
+      alias_index construction, not just a documentation convention.
+    origin: reconstructed
+    epistemic_status: execution_verified
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - load_rates
+      - _validate_and_build
+    provenance:
+      - source_kind: test
+        uri: tests/test_rates.py
+        selector: test_duplicate_model_key_raises
+        content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: test
+        uri: tests/test_rates.py
+        selector: test_alias_colliding_with_model_key_raises
+        content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: test
+        uri: tests/test_rates.py
+        selector: test_duplicate_alias_raises
+        content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - agent_cost/rates.py
+
+  - observation_id: OBS-003
+    topic_id: T-01
+    claim_kind: invariant
+    statement: >-
+      Two rate periods for the same model are rejected as "overlapping" if
+      one's effective_until (or an open-ended period's implicit
+      datetime.max) is strictly after the next one's effective_from; a
+      period ending exactly when the next one begins (touching, not
+      overlapping) is accepted. Periods are sorted by effective_from before
+      this adjacent-pair check runs.
+    origin: reconstructed
+    epistemic_status: execution_verified
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - _build_model_entry
+    provenance:
+      - source_kind: test
+        uri: tests/test_rates.py
+        selector: test_overlapping_rate_periods_raise
+        content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: test
+        uri: tests/test_rates.py
+        selector: test_adjacent_non_overlapping_periods_are_ok
+        content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: source
+        uri: agent_cost/rates.py
+        selector: _build_model_entry
+        content_digest: "d725baf8709df0732327aae58d8226dd943e3f2813d07ab361b740c02649d5ed"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-source
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - agent_cost/rates.py
