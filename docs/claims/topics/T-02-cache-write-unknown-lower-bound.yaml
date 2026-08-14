@@ -1,0 +1,17 @@
+topic_id: T-02
+title: cache_write_unknown lower-bound pricing semantics
+description: >-
+  When a prompt-cache write's TTL breakdown (5-minute vs 1-hour) cannot be
+  determined from the source log, agent-cost records it as the
+  `cache_write_unknown` token kind and prices it at the cheaper 5-minute
+  rate as an explicit lower bound, flagged `lower_bound`, rather than
+  guessing at the more expensive 1-hour rate. Codex CLI never produces this
+  token kind at all, since it exposes no cache-write signal.
+representative_symbols:
+  - price_fact
+  - parse_session_facts
+representative_paths:
+  - agent_cost/aggregate.py
+  - agent_cost/readers/claude.py
+  - agent_cost/readers/codex.py
+related_topics: [T-01, T-03]

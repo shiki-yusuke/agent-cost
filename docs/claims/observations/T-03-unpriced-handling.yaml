@@ -1,0 +1,140 @@
+topic_id: T-03
+observations:
+  - observation_id: OBS-008
+    topic_id: T-03
+    claim_kind: behavior
+    statement: >-
+      price_fact() returns (None, "unpriced", None) -- never a guessed
+      number -- both when the fact's model_key does not resolve against the
+      catalog at all, and when the model resolves but the specific
+      token-kind rate field for the covering rate period is None (e.g.
+      OpenAI models carry no cache_write_5m rate at all, so a cache-write
+      fact against gpt-5.5 is unpriced even though the model itself is
+      known).
+    origin: reconstructed
+    epistemic_status: execution_verified
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - price_fact
+    provenance:
+      - source_kind: test
+        uri: tests/test_aggregate.py
+        selector: test_price_fact_unknown_model_is_unpriced
+        content_digest: "4fa19557fb67f561bd959564173e7f05ba63205d1871683f11d9ff521956b34a"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: test
+        uri: tests/test_aggregate.py
+        selector: test_price_fact_codex_cache_write_is_unpriced
+        content_digest: "4fa19557fb67f561bd959564173e7f05ba63205d1871683f11d9ff521956b34a"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: test
+        uri: tests/test_rates.py
+        selector: test_gpt_5_5_cache_write_is_unpriced
+        content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - agent_cost/aggregate.py
+
+  - observation_id: OBS-009
+    topic_id: T-03
+    claim_kind: behavior
+    statement: >-
+      build_rows() marks an entire grouped row "unpriced" as soon as any one
+      of the facts folded into that bucket is unpriced, even if other facts
+      in the same bucket priced normally -- a row is never reported as
+      fully priced when part of its token count actually wasn't.
+    origin: reconstructed
+    epistemic_status: execution_verified
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - build_rows
+    provenance:
+      - source_kind: test
+        uri: tests/test_aggregate.py
+        selector: test_build_rows_mixed_priced_and_unpriced_marks_row_unpriced
+        content_digest: "4fa19557fb67f561bd959564173e7f05ba63205d1871683f11d9ff521956b34a"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - agent_cost/aggregate.py
+
+  - observation_id: OBS-010
+    topic_id: T-03
+    claim_kind: invariant
+    statement: >-
+      build_rows()'s row.pricing_status ranking is defined in code as a
+      full three-way order -- unpriced (rank 0) beats lower_bound (rank 1)
+      beats priced (rank 2), via _STATUS_RANK -- so a row containing both a
+      lower_bound fact and a plain priced fact should end up "lower_bound",
+      not "priced". Only the unpriced-over-priced half of this ordering is
+      exercised by an existing test
+      (test_build_rows_mixed_priced_and_unpriced_marks_row_unpriced); no
+      test in tests/test_aggregate.py builds a row from a mix of a
+      lower_bound fact and a priced fact, so the lower_bound-vs-priced half
+      of the ranking is confirmed only by reading _STATUS_RANK and
+      build_rows() directly, not by execution.
+    origin: reconstructed
+    epistemic_status: single_source_observation
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - build_rows
+      - _STATUS_RANK
+    provenance:
+      - source_kind: source
+        uri: agent_cost/aggregate.py
+        selector: _STATUS_RANK
+        content_digest: "a2d26673aa9122f441c92c4d1fe7662bfa6dceda98a862ae7136114f45a8cb8c"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-source
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - agent_cost/aggregate.py
+
+  - observation_id: OBS-011
+    topic_id: T-03
+    claim_kind: invariant
+    statement: >-
+      DataQuality.unpriced_tokens (the report-wide total returned alongside
+      build_rows()'s row list) and a single row's own unpriced_tokens field
+      are both accumulated from the exact same set of unpriced facts in one
+      pass, so the two numbers stay consistent with each other by
+      construction rather than by a separate reconciliation step.
+    origin: reconstructed
+    epistemic_status: execution_verified
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - build_rows
+      - DataQuality
+    provenance:
+      - source_kind: test
+        uri: tests/test_aggregate.py
+        selector: test_build_rows_unknown_model_is_unpriced_and_flagged
+        content_digest: "4fa19557fb67f561bd959564173e7f05ba63205d1871683f11d9ff521956b34a"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - agent_cost/aggregate.py
