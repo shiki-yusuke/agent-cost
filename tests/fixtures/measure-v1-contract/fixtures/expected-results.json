@@ -1,0 +1,70 @@
+{
+  "protocol_version": "measure/v1",
+  "fixture_format_version": "1",
+  "description": "Machine-readable expected outcome for every fixture in this directory. `verify-fixtures.mjs` reads this file and fails (non-zero exit) if any fixture's actual outcome does not match. Every fixture here is a full `measure --format json` payload (not a sub-object), because measure/v1 is a single flat contract with no independently-identity-bearing sub-records (unlike trace/v1's events or attribution/v1's binding-records). `reason_code` for a \"reject\" fixture is either a named semantic-check code (e.g. \"row_tokens_sum_mismatch\") or a raw schema-validator JSON-path (e.g. \"$.protocol_version\"), same leading-token convention as agent-metrics/v1, trace/v1, attribution/v1 and estimate/v2. `all_forbidden_keys_flagged: true` on a fixture entry means: instead of checking a single `reason_code`, verify that every key in contracts/shared/personal-dimensions.mjs's forbidden set is individually flagged. PROVENANCE (sol review should, precise wording over the previous, slightly overclaiming version): every accept fixture's content -- every key and value -- was captured by actually running `agent-cost measure --format json` against a local agent-cost checkout, not hand-authored from a description of the intended shape. `generated_at` is the one deliberate exception: it was replaced with a fixed value (`2026-08-14T00:00:00+00:00`) for reproducibility (a real run's timestamp is different every time this directory is re-generated, which would make git diffs noisy for no reason) -- every other field is the real, unedited captured value. No re-indentation was needed to reach the pretty-printed form below: agent-cost's own `render_json` already serializes with `json.dumps(..., indent=2)`, the exact style this directory's fixtures use. Every reject fixture is one deliberate mutation of an accept fixture (changing exactly the one thing its `notes` describes) -- with a single documented exception: `invalid-personal-dimension` plants all 11 forbidden personal-dimension keys at once, not one, specifically to prove the scan's coverage across the whole denylist in one fixture rather than needing 11 near-duplicate ones.",
+  "fixtures": [
+    {
+      "id": "accept-matched-normal",
+      "files": { "record": "accept-matched-normal.json" },
+      "expected": "accept",
+      "reason_code": null,
+      "notes": "One requested session_id, fully priced usage (claude-opus-4-8, input_nocache + output), matched: true. The ordinary case."
+    },
+    {
+      "id": "accept-matched-false",
+      "files": { "record": "accept-matched-false.json" },
+      "expected": "accept",
+      "reason_code": null,
+      "notes": "A requested session_id with no matching usage anywhere still gets a well-formed entry in `sessions` (matched: false, empty rows, all-zero totals) -- measure exits 0, not an error, for this case (agent_cost/cli.py's own docstring: 'the case where none of the requested session ids matched anything' is success, not failure)."
+    },
+    {
+      "id": "accept-unpriced-lower-bound-mixed",
+      "files": { "record": "accept-unpriced-lower-bound-mixed.json" },
+      "expected": "accept",
+      "reason_code": null,
+      "notes": "One matched session with two rows: a cache_write_unknown row priced as a lower_bound (agent_cost/aggregate.py prices an unresolvable cache-write TTL at the cheaper 5-minute rate and flags it, never at the more expensive 1-hour rate as a guess), and an unpriced row for a model absent from the rates catalog. Exercises both non-\"priced\" pricing_status values in one payload, plus data_quality.unpriced_tokens > 0."
+    },
+    {
+      "id": "invalid-protocol-version",
+      "files": { "record": "invalid-protocol-version.json" },
+      "expected": "reject",
+      "reason_code": "$.protocol_version",
+      "notes": "protocol_version is \"measure/v0\" instead of the required literal \"measure/v1\" -- a consumer that doesn't check this before trusting the shape (agent_cost/cli.py's own MEASURE_PROTOCOL_VERSION comment: 'Consumers ... should check this before trusting the shape of the payload') could misparse a future breaking version."
+    },
+    {
+      "id": "invalid-totals-missing-key",
+      "files": { "record": "invalid-totals-missing-key.json" },
+      "expected": "reject",
+      "reason_code": "$.total.totals",
+      "notes": "total.totals is missing its \"credits\" key -- rows_totals() always emits exactly 5 keys as the current documented minimum. Caught by `required`, which this schema enforces in full even though it does not set additionalProperties:false anywhere (see the schema's own description) -- an open schema still checks for every documented field, it only stops short of forbidding undocumented extra ones."
+    },
+    {
+      "id": "invalid-personal-dimension",
+      "files": { "record": "invalid-personal-dimension.json" },
+      "expected": "reject",
+      "all_forbidden_keys_flagged": true,
+      "notes": "EXCEPTION to the one-deliberate-mutation rule above (see this file's top-level description): all 11 forbidden personal-dimension keys planted at once (as extra top-level properties), not just one. measure/v1 carries no per-actor identity anywhere in its real shape (it is a pure token/cost digest keyed only by session_id, itself an opaque identifier, not a person) -- this fixture proves the scan actually flags every one of the 11 keys individually, not just whichever single key an ordinary fixture happens to test. Unlike this repo's other (closed-schema) contracts, this is NOT also caught by additionalProperties:false -- measure/v1's schema is deliberately open (see the schema's own description), so the personal-dimension scan is the only thing standing between this payload and a false accept, which is exactly why it is checked unconditionally, not only as defense-in-depth."
+    },
+    {
+      "id": "invalid-matched-false-non-zero",
+      "files": { "record": "invalid-matched-false-non-zero.json" },
+      "expected": "reject",
+      "reason_code": "matched_false_must_have_zero_totals",
+      "notes": "sol review must2: sessions[\"no-such-session\"].matched is false, but its totals.tokens/estimated_cost_usd are declared non-zero (rows stays empty, so this specifically isolates the totals-vs-matched:false invariant from the rows-vs-matched:false one). 'No usage matched this session_id' and 'usage matched but happened to net to zero' are different facts -- a matched:false session's totals are not just usually zero, they MUST be zero, by construction (there is nothing to sum)."
+    },
+    {
+      "id": "invalid-total-rows-wrong-dimension",
+      "files": { "record": "invalid-total-rows-wrong-dimension.json" },
+      "expected": "reject",
+      "reason_code": "total_rows_dimension_mismatch",
+      "notes": "sol review must2: derived from accept-matched-normal by relabeling every total.rows[].agent from \"claude\" to \"codex\", while sessions[\"session-a\"].rows (the only session) still correctly says \"claude\" and total.totals' scalar sums are left untouched (and therefore still numerically correct). This is deliberately NOT caught by the totals_sum_mismatch check (check 3/4 in the schema's description) -- it demonstrates why that scalar-only comparison is insufficient on its own: total.rows can silently attribute real tokens to the wrong agent/model/token_kind bucket while every top-level number still balances. Only a per-(agent, model, token_kind) re-aggregation of the union of sessions[*].rows, compared bucket-by-bucket against total.rows, catches this."
+    },
+    {
+      "id": "invalid-session-entry-missing-key",
+      "files": { "record": "invalid-session-entry-missing-key.json" },
+      "expected": "reject",
+      "reason_code": "$.sessions.session-a",
+      "notes": "sol review must4: sessions.session-a is missing its \"totals\" key entirely. This fixture's specific purpose is to guard contracts/shared/schema-validator.mjs's `additionalProperties`-as-a-schema branch (added for measure/v1's session_id-keyed `sessions` dictionary): if that branch were ever removed or broken, nothing else in this schema validates the CONTENTS of `sessions[*]` at all (only the top-level `sessions` object's own type), so this fixture would silently regress from reject to accept -- a regression the other 3 accept fixtures (none of which have a malformed session entry) cannot detect."
+    }
+  ]
+}

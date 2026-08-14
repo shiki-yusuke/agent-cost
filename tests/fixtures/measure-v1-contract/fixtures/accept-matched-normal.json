@@ -1,0 +1,92 @@
+{
+  "protocol_version": "measure/v1",
+  "generated_at": "2026-08-14T00:00:00+00:00",
+  "window": { "since": null, "until": null },
+  "timezone": "UTC",
+  "agent": ["claude", "codex"],
+  "rates": {
+    "catalog_version": "2026-07-29",
+    "sha256": "5d86e11b3c953f03df6841ac5c48a4ac6a90701e60f24b42e814ce9ba47c25e9"
+  },
+  "session_ids": ["session-a"],
+  "sessions": {
+    "session-a": {
+      "matched": true,
+      "rows": [
+        {
+          "month": null,
+          "agent": "claude",
+          "model": "claude-opus-4-8",
+          "token_kind": "input_nocache",
+          "tokens": 1000000,
+          "priced_tokens": 1000000,
+          "unpriced_tokens": 0,
+          "estimated_cost_usd": 5.0,
+          "credits": 0.0,
+          "pricing_status": "priced"
+        },
+        {
+          "month": null,
+          "agent": "claude",
+          "model": "claude-opus-4-8",
+          "token_kind": "output",
+          "tokens": 200000,
+          "priced_tokens": 200000,
+          "unpriced_tokens": 0,
+          "estimated_cost_usd": 5.0,
+          "credits": 0.0,
+          "pricing_status": "priced"
+        }
+      ],
+      "totals": {
+        "tokens": 1200000,
+        "priced_tokens": 1200000,
+        "unpriced_tokens": 0,
+        "estimated_cost_usd": 10.0,
+        "credits": 0.0
+      }
+    }
+  },
+  "total": {
+    "rows": [
+      {
+        "month": null,
+        "agent": "claude",
+        "model": "claude-opus-4-8",
+        "token_kind": "input_nocache",
+        "tokens": 1000000,
+        "priced_tokens": 1000000,
+        "unpriced_tokens": 0,
+        "estimated_cost_usd": 5.0,
+        "credits": 0.0,
+        "pricing_status": "priced"
+      },
+      {
+        "month": null,
+        "agent": "claude",
+        "model": "claude-opus-4-8",
+        "token_kind": "output",
+        "tokens": 200000,
+        "priced_tokens": 200000,
+        "unpriced_tokens": 0,
+        "estimated_cost_usd": 5.0,
+        "credits": 0.0,
+        "pricing_status": "priced"
+      }
+    ],
+    "totals": {
+      "tokens": 1200000,
+      "priced_tokens": 1200000,
+      "unpriced_tokens": 0,
+      "estimated_cost_usd": 10.0,
+      "credits": 0.0
+    }
+  },
+  "data_quality": {
+    "malformed_events": 0,
+    "skipped_files": 0,
+    "negative_deltas": 0,
+    "unpriced_tokens": 0,
+    "source_quality": { "ok": 2, "first_event_delta": 0 }
+  }
+}
