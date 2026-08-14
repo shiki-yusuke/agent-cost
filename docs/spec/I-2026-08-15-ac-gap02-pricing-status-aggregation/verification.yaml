@@ -15,7 +15,12 @@ spec_consensus:
   spec_digest: 331857ce64db8ad4e959a8c31c98bf6736b652e2ab071d57b489f615c09cfa61
   verification_digest: 842474e4c3e7c98e2ee9d276aec56500802fb4fcaef256bffbce2de9f1e25ccb
   deviations: []
-  reviewer_ack: null
+  reviewer_ack:
+    reviewer_kind: independent_agent
+    reviewer_id: claude-fable-main
+    acked_at: 2026-08-14T16:41:33.047Z
+    spec_sha256: 331857ce64db8ad4e959a8c31c98bf6736b652e2ab071d57b489f615c09cfa61
+    verification_sha256: 842474e4c3e7c98e2ee9d276aec56500802fb4fcaef256bffbce2de9f1e25ccb
 success_criteria_matrix:
   - criterion: ①priced のみの facts から成る行の pricing_status が priced になることを確認するテストがある
     covered_by: test
