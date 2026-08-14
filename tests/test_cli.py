@@ -3,6 +3,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from agent_cost import cli
+from agent_cost.facts import SOURCE_QUALITY_VALUES
 
 
 def _write_claude_session(claude_home, slug, session_name, events):
@@ -636,3 +637,108 @@ def test_measure_since_until_accept_z_suffix(tmp_path, monkeypatch, capsys):
     assert payload["sessions"]["session-a"]["totals"]["tokens"] == 200
     assert payload["window"]["since"] == "2026-06-01T00:00:00+00:00"
     assert payload["window"]["until"] == "2026-07-01T00:00:00+00:00"
+
+
+def test_measure_json_schema_is_locked(tmp_path, monkeypatch, capsys):
+    """Pins the measure JSON's shape so a future change to it is deliberate.
+
+    A known gap between report and measure until now: report has had
+    test_report_json_schema_is_locked since the JSON format existed, but measure --
+    a separate, independently hand-built payload in cmd_measure -- never got the same
+    pin. This follows that test's own conventions (exact key-set assertions, one
+    session exercising all three pricing_status values) so a shape change to either
+    command's JSON is caught the same way.
+    """
+    claude_home, _codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [
+            _assistant_event("2026-06-01T00:00:00Z", "claude-opus-4-8", 1_000_000, 0, session_id="session-a"),
+            # Unknown model -> unpriced row.
+            _assistant_event("2026-06-01T00:01:00Z", "totally-unknown-model-xyz", 500, 0, session_id="session-a"),
+            # cache_creation with no TTL breakdown -> cache_write_unknown -> lower_bound row.
+            {
+                "type": "assistant",
+                "timestamp": "2026-06-01T00:02:00Z",
+                "sessionId": "session-a",
+                "message": {
+                    "model": "claude-opus-4-8",
+                    "usage": {"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 1_000_000},
+                },
+            },
+        ],
+    )
+
+    rc = cli.main(["measure", "--session-id", "session-a", "--session-id", "no-such-session", "--format", "json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert set(payload.keys()) == {
+        "protocol_version",
+        "generated_at",
+        "window",
+        "timezone",
+        "agent",
+        "rates",
+        "session_ids",
+        "sessions",
+        "total",
+        "data_quality",
+    }
+    assert payload["protocol_version"] == "measure/v1"
+    assert set(payload["window"].keys()) == {"since", "until"}
+    assert set(payload["rates"].keys()) == {"catalog_version", "sha256"}
+    assert set(payload["data_quality"].keys()) == {
+        "malformed_events",
+        "skipped_files",
+        "negative_deltas",
+        "unpriced_tokens",
+        "source_quality",
+    }
+    assert set(payload["data_quality"]["source_quality"].keys()) == set(SOURCE_QUALITY_VALUES)
+
+    row_columns = {
+        "month",
+        "agent",
+        "model",
+        "token_kind",
+        "tokens",
+        "priced_tokens",
+        "unpriced_tokens",
+        "estimated_cost_usd",
+        "credits",
+        "pricing_status",
+    }
+    totals_columns = {"tokens", "priced_tokens", "unpriced_tokens", "estimated_cost_usd", "credits"}
+    session_columns = {"matched", "rows", "totals"}
+
+    assert set(payload["sessions"].keys()) == {"session-a", "no-such-session"}
+    for session in payload["sessions"].values():
+        assert set(session.keys()) == session_columns
+        assert set(session["totals"].keys()) == totals_columns
+        for row in session["rows"]:
+            assert set(row.keys()) == row_columns
+            assert row["pricing_status"] in ("priced", "lower_bound", "unpriced")
+            # measure never groups by month.
+            assert row["month"] is None
+
+    assert set(payload["total"].keys()) == {"rows", "totals"}
+    assert set(payload["total"]["totals"].keys()) == totals_columns
+
+    session_a = payload["sessions"]["session-a"]
+    assert session_a["matched"] is True
+    by_status = {r["pricing_status"] for r in session_a["rows"]}
+    assert by_status == {"priced", "unpriced", "lower_bound"}
+
+    no_such = payload["sessions"]["no-such-session"]
+    assert no_such["matched"] is False
+    assert no_such["rows"] == []
+    assert no_such["totals"] == {
+        "tokens": 0,
+        "priced_tokens": 0,
+        "unpriced_tokens": 0,
+        "estimated_cost_usd": 0.0,
+        "credits": 0.0,
+    }
