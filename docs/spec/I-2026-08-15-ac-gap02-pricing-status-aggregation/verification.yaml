@@ -1,0 +1,48 @@
+schema_version: "1.0"
+intent_id: I-2026-08-15-ac-gap02-pricing-status-aggregation
+test_matrix:
+  - ears_rule: R2-R3
+    test_type: unit
+    test_name: test_build_rows_worst_status_ranking_is_order_independent ほか3件
+    status: added
+    note: 対象分岐の回帰テスト。子セッションと main が独立に pytest green を確認
+test_gaps: []
+manual_verification: []
+goal_stopping_condition:
+  - success_criteria_matrix 全行が covered_by none 以外
+spec_consensus:
+  spec_ssot_ref: docs/spec/I-2026-08-15-ac-gap02-pricing-status-aggregation/spec.md
+  spec_digest: 331857ce64db8ad4e959a8c31c98bf6736b652e2ab071d57b489f615c09cfa61
+  verification_digest: 842474e4c3e7c98e2ee9d276aec56500802fb4fcaef256bffbce2de9f1e25ccb
+  deviations: []
+  reviewer_ack: null
+success_criteria_matrix:
+  - criterion: ①priced のみの facts から成る行の pricing_status が priced になることを確認するテストがある
+    covered_by: test
+    evidence: test_build_rows_all_priced_facts_mark_row_priced
+    negation_test: assert 反転で red
+  - criterion: ②priced と lower_bound（cache_write_unknown 由来）が混在する行の pricing_status が
+      lower_bound になることを確認するテストがある（GAP-02 が指摘した未検証半分）
+    covered_by: test
+    evidence: test_build_rows_mixed_priced_and_lower_bound_marks_row_lower_bound（GAP-02
+      の核心）
+    negation_test: assert 反転で red
+  - criterion: ③lower_bound と unpriced が混在する行の pricing_status が unpriced になることを確認するテストがある
+    covered_by: test
+    evidence: test_build_rows_mixed_lower_bound_and_unpriced_marks_row_unpriced
+    negation_test: assert 反転で red
+  - criterion: ④同じ facts 集合でも構築順（入力順）を入れ替えれば pricing_status の結果が変わらないことを確認するテストがある
+    covered_by: test
+    evidence: test_build_rows_worst_status_ranking_is_order_independent（3順序で収束確認）
+    negation_test: 順序依存が入れば red
+  - criterion: pytest がリポジトリ全体で green である
+    covered_by: test
+    evidence: 111 passed（子セッション + main 独立実行）
+    negation_test: 任意のテスト失敗で red
+  - criterion: コミットメッセージに AC-GAP-02 を含む
+    covered_by: diff
+    evidence: コミット dda9bad のメッセージに AC-GAP-02 を含む
+    negation_test: git log --grep AC-GAP-02 が空なら未達
+cross_check_intent_vs_spec:
+  performed_at: 2026-08-15 (Phase 3→4)
+  finding: intent.success 全行 ↔ matrix を1対1突合（行順一致）、過不足なし
