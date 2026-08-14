@@ -1,0 +1,30 @@
+schema_version: "1.0"
+intent_id: I-2026-08-15-agent-cost-claims-corpus
+decision: pass
+confidence: high
+halt_triggers:
+  - condition: corpus が実装コード（agent_cost/**, tests/**）を変更してしまう
+    triggered: false
+    evidence: git diff --stat で docs/claims/** と docs/spec/** のみを確認
+per_lens:
+  - lens_id: lifecycle_management
+    result: not_applicable
+  - lens_id: error_handling
+    result: not_applicable
+  - lens_id: security
+    result: not_applicable
+  - lens_id: performance
+    result: not_applicable
+  - lens_id: a11y
+    result: not_applicable
+  - lens_id: i18n
+    result: not_applicable
+  - lens_id: architecture
+    result: not_applicable
+  - lens_id: test_coverage
+    result: applicable
+    finding: execution_verified 12件は実在テストの assert に対応。探索で実テストギャップ2件（Claude reader の部分TTL leftover 分岐 / pricing_status 集計順序）を発見し GAP-01/02 に記録（本 lane では実装変更しないため修正はスコープ外）
+    taxonomy: test_missing
+  - lens_id: documentation
+    result: not_applicable
+missing_scenarios: []
