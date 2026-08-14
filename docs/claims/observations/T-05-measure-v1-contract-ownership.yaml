@@ -1,0 +1,132 @@
+topic_id: T-05
+observations:
+  - observation_id: OBS-015
+    topic_id: T-05
+    claim_kind: decision_record
+    statement: >-
+      measure/v1's version number, prose contract, and implementation are
+      owned end-to-end by agent-cost (agent_cost/cli.py's
+      MEASURE_PROTOCOL_VERSION constant and cmd_measure), while the JSON
+      Schema single source of truth and its conformance fixtures live in a
+      different repository, ai-agent-skills-playbook
+      (contracts/measure/v1/measure-output.schema.json), and are vendored
+      byte-for-byte, read-only, into agent-cost's own test tree at a pinned
+      commit (tests/fixtures/measure-v1-contract/, per its own UPSTREAM
+      pin file) -- this repo never edits the playbook's doc or vice versa.
+    origin: recorded
+    epistemic_status: recorded_decision
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - MEASURE_PROTOCOL_VERSION
+      - cmd_measure
+    provenance:
+      - source_kind: source
+        uri: agent_cost/cli.py
+        selector: MEASURE_PROTOCOL_VERSION
+        content_digest: "1817901cd7b1017bc678ffc87fdf6663b4d2899d3214e35da00cf4a654c3c2f8"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-source
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: test
+        uri: tests/fixtures/measure-v1-contract/UPSTREAM
+        selector: "Vendored commit / Vendored into"
+        content_digest: "de8bab686bc31c97b5c041d70e349e6cc6f23f8d7ead79daec91a17e3b478b18"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-source
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: test
+        uri: tests/test_measure_v1_contract.py
+        selector: "module docstring"
+        content_digest: "d0f9887148138cb27e60d7fc3d8ab57c8be49a3e6d6397eb1e43e8aba0957615"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-source
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: review_memory
+        uri: "ai-agent-skills-playbook:docs/protocols/measure-v1.md@d919cce6f29f87ff2e7f143d4759e2a07a7e624b"
+        selector: "“This document is not the contract's normative source” section"
+        content_digest: not_computed_external_to_repo
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: external-doc-read-not-git-blob-verifiable
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - agent_cost/cli.py
+      - tests/fixtures/measure-v1-contract/UPSTREAM
+
+  - observation_id: OBS-016
+    topic_id: T-05
+    claim_kind: behavior
+    statement: >-
+      agent-cost's own hand-written structural checker
+      (check_measure_payload in tests/test_measure_v1_contract.py) agrees
+      with the vendored contract's own accept/reject labels: all 3 vendored
+      "accept" fixtures pass it with zero issues, and all 6 vendored
+      "reject" fixtures produce at least one issue (with the expected
+      reason code where one is asserted, e.g. protocol_version mismatch,
+      a matched:false session entry with non-zero totals, or
+      total.rows disagreeing with the sessions-level re-aggregation).
+    origin: reconstructed
+    epistemic_status: execution_verified
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - check_measure_payload
+    provenance:
+      - source_kind: test
+        uri: tests/test_measure_v1_contract.py
+        selector: test_vendored_accept_fixtures_pass_the_structural_check
+        content_digest: "d0f9887148138cb27e60d7fc3d8ab57c8be49a3e6d6397eb1e43e8aba0957615"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+      - source_kind: test
+        uri: tests/test_measure_v1_contract.py
+        selector: test_vendored_reject_fixtures_fail_the_structural_check
+        content_digest: "d0f9887148138cb27e60d7fc3d8ab57c8be49a3e6d6397eb1e43e8aba0957615"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - tests/test_measure_v1_contract.py
+
+  - observation_id: OBS-017
+    topic_id: T-05
+    claim_kind: behavior
+    statement: >-
+      A live payload from cli.main(["measure", ...]), generated fresh by
+      the current implementation against a synthetic Claude Code session,
+      has exactly the same top-level/rates/window/data_quality/
+      source_quality/session-entry/row key sets as the vendored
+      accept-matched-normal.json fixture, and passes check_measure_payload
+      with zero issues -- this is checked against the external contract's
+      fixture, not only against a hardcoded expectation internal to this
+      repo (that internal-only pin is
+      tests/test_cli.py::test_measure_json_schema_is_locked, a distinct
+      test).
+    origin: reconstructed
+    epistemic_status: execution_verified
+    review_status: unreviewed
+    conformance_status: matched
+    subject_refs:
+      - cmd_measure
+      - check_measure_payload
+    provenance:
+      - source_kind: test
+        uri: tests/test_measure_v1_contract.py
+        selector: test_live_measure_output_matches_vendored_contract_key_shape
+        content_digest: "d0f9887148138cb27e60d7fc3d8ab57c8be49a3e6d6397eb1e43e8aba0957615"
+        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        extraction_method: static-read-test-assertions
+        observed_at: "2026-08-15T00:00:00Z"
+    supporting_refs: []
+    contradicting_refs: []
+    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    affected_paths:
+      - agent_cost/cli.py
+      - tests/test_measure_v1_contract.py

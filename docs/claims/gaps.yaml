@@ -1,0 +1,72 @@
+schema_version: "1.0"
+# Record of gaps found (or explicitly searched-for-and-not-found) while
+# building this corpus. See docs/schema.md (evidence-docs package) for the
+# gap taxonomy this ledger is meant to support.
+gaps:
+  - id: GAP-01
+    taxonomy: test_missing
+    title: "No test exercises the partial-TTL-breakdown leftover branch of parse_session_facts"
+    description: >-
+      agent_cost/readers/claude.py's parse_session_facts, when
+      usage.cache_creation is a dict, computes
+      leftover = cache_creation_input_tokens - (ephemeral_5m + ephemeral_1h)
+      and emits that leftover as an additional cache_write_unknown fact if
+      it is positive (readers/claude.py lines ~104-112). Both existing
+      tests (test_cache_creation_ttl_breakdown_present,
+      test_cache_creation_without_ttl_breakdown_is_unknown) only cover the
+      two extremes -- a breakdown dict that exactly accounts for the total,
+      and no breakdown dict at all -- so the partial-breakdown case (a
+      cache_creation dict present but its two counters summing to less
+      than cache_creation_input_tokens) is a real, reachable code path with
+      no test asserting what fact(s) it produces.
+    gap_found: true
+    related_observation_ids: [OBS-004]
+    evidence_ref: "agent_cost/readers/claude.py#parse_session_facts; tests/test_reader_claude.py"
+
+  - id: GAP-02
+    taxonomy: test_missing
+    title: "No test exercises the lower_bound-vs-priced half of build_rows' pricing_status ranking"
+    description: >-
+      agent_cost/aggregate.py's _STATUS_RANK defines a full three-way order
+      (unpriced=0 < lower_bound=1 < priced=2) that build_rows() uses to
+      downgrade a row's pricing_status to the worst status among its
+      facts. tests/test_aggregate.py's
+      test_build_rows_mixed_priced_and_unpriced_marks_row_unpriced only
+      exercises the unpriced-vs-priced half (mixing an unpriced fact with a
+      normally-priced one). No test in this suite builds a row from a mix
+      of a lower_bound fact (e.g. cache_write_unknown) and a plain priced
+      fact in the same group-by bucket to confirm the row ends up
+      "lower_bound" rather than "priced" -- that half of the ranking is
+      currently confirmed only by reading _STATUS_RANK/build_rows directly
+      (see OBS-010).
+    gap_found: true
+    related_observation_ids: [OBS-010]
+    evidence_ref: "agent_cost/aggregate.py#_STATUS_RANK,build_rows; tests/test_aggregate.py"
+
+  - id: GAP-03
+    taxonomy: independent_re_search_no_drift
+    title: "Re-checked README's pricing claims against rates.json/code for this corpus's five topics; no drift found"
+    description: >-
+      Independently re-checked three README claims that this corpus's
+      observations rely on, against the actual current rates.json/code,
+      looking specifically for a case where the README's prose and the
+      catalog/implementation had drifted apart: (1) "the row also carries a
+      credits figure" is scoped to Codex/OpenAI models only -- confirmed by
+      reading rates.json's models list: every gpt-5.x/gpt-image-2 model
+      entry carries credits_per_mtok, and no claude-* model entry does, so
+      Claude rows never carry a non-zero credits value; (2) "all Claude
+      usage is priced at standard rates" (no batch discount signal) --
+      confirmed rates.json has exactly one flat rate per (model, period),
+      no batch-specific field anywhere in the schema build_model_entry
+      reads; (3) Codex's `total_tokens == input_tokens + output_tokens`
+      claim (reasoning_output_tokens is a sub-breakdown, not additional) is
+      stated in parse_rollout_facts's own docstring and is consistent with
+      the reader code only ever emitting an "output" fact from
+      output_tokens, never reasoning_output_tokens, directly. No
+      statement contradicting current rates.json/code was found for these
+      three checks; this is not a claim that the corpus's five topics are
+      drift-free overall, only that these three specific cross-checks came
+      back clean.
+    gap_found: false
+    related_observation_ids: [OBS-006, OBS-007]
+    evidence_ref: "README.md#What this measures, and what it doesn't; agent_cost/rates.json; agent_cost/readers/codex.py#parse_rollout_facts"

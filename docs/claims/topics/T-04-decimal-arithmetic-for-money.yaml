@@ -1,0 +1,15 @@
+topic_id: T-04
+title: Decimal used exclusively for money-shaped values
+description: >-
+  Rate catalog values, per-fact cost/credit calculations, and cross-row
+  aggregation all use decimal.Decimal rather than float, converting to
+  float only once, at the very end, for JSON serialization -- and never for
+  the arithmetic itself.
+representative_symbols:
+  - _parse_decimal
+  - price_fact
+  - rows_totals
+representative_paths:
+  - agent_cost/rates.py
+  - agent_cost/aggregate.py
+related_topics: [T-01, T-02]

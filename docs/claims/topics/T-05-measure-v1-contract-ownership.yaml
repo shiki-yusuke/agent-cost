@@ -1,0 +1,17 @@
+topic_id: T-05
+title: measure/v1 versioned-tracking contract, cross-repo ownership split
+description: >-
+  agent-cost measure --format json is a cross-language conformance contract
+  (measure/v1). agent-cost owns the version number, prose contract, and
+  implementation; the JSON Schema single source of truth and conformance
+  fixtures live in a different repository (ai-agent-skills-playbook) and
+  are vendored read-only into agent-cost's own test suite at a pinned
+  commit, which agent-cost's own tests check its live output against.
+representative_symbols:
+  - MEASURE_PROTOCOL_VERSION
+  - cmd_measure
+  - check_measure_payload
+representative_paths:
+  - agent_cost/cli.py
+  - tests/test_measure_v1_contract.py
+related_topics: [T-03, T-04]

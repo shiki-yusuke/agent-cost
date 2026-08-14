@@ -1,0 +1,64 @@
+schema_version: "1.0"
+intent_id: I-2026-08-15-agent-cost-claims-corpus
+execution_mode: manual
+budget: []
+intent:
+  business_goal: evidence-docs の第2リポジトリ実証（sketch-web 以外・Python）と agent-cost pricing ドメインの仕様可視化
+  user_visible_intent: agent-cost に pricing ドメイン（rates.json 検証規則 / cache_write_unknown lower_bound 意味論 / unpriced 扱い / Decimal 使用 / measure v1 契約）の Claim Corpus を導入
+  success:
+    - docs/claims/ に evidence-docs 形式の Claim Corpus（topics 3-5件・observations 12-18件）を作成し、agent-cost の pricing 系（rates.json 検証規則・cache_write_unknown の lower_bound 意味論・unpriced の扱い・Decimal 使用・measure/v1 契約）のみを対象とする
+    - HEAD commit を repo-commit として evidence-docs validate/generate がエラーなく完走し、generate を2回実行した site/ と bundle/ が byte-identical であることを確認している
+    - evidence-docs context の実行例（--query '{"seeds":{"paths":["agent_cost/rates.py"]},"token_budget":4000}'）を docs/claims/README.md に記録している
+    - drift 探索を最低1回真剣に実施し、結果（検出した内容、または「探索したが未検出」）を gaps.yaml に正直に記録している
+    - agent_cost/** および tests/** の実装コードは一切変更されていない（docs/claims/** のみ追加）
+  non_goal:
+    - agent-cost の pricing 以外のドメイン（readers の Claude/Codex ログ解析詳細、report/export の CLI 出力形式など）を Claim Corpus 化すること
+    - agent_cost の実装コードやテストを変更・修正すること
+    - ai-agent-skills-playbook（measure/v1 契約の正本側リポジトリ）自体のドキュメントを変更すること
+  constraints:
+    - agent-cost の実装コード（agent_cost/**, tests/**）は変更しない。docs/claims/** のみ追加する
+    - 数値 confidence は使わない（epistemic_status の語彙のみ使用）
+    - 未確認の主張を確認済み（execution_verified 等）に見せない
+  primary_user: agent-cost 利用者と将来のメンテナ
+  state_segments: []
+  known_affected_behavior: []
+  declared_risk: low
+premise_evidence:
+  required: false
+  reason: >-
+    このタスクは docs/claims/** への追加のみで、agent_cost の実装コードに新しい
+    guard/分岐/完了条件を導入しない。AI起因ではあるが、対象は「既存の実装・テストが
+    実際に何をしているか」を記録するドキュメンテーション作業であり、症状の再現や
+    未観測の前提の確認は不要（premise_evidence の適用条件である「新しい guard/
+    rejection branch/state/completion condition の導入」に該当しない）。
+ai_inferred_scope:
+  affected_layers:
+    - documentation
+  related_files:
+    - agent_cost/rates.py
+    - agent_cost/aggregate.py
+    - agent_cost/facts.py
+    - agent_cost/cli.py
+    - agent_cost/readers/claude.py
+    - agent_cost/readers/codex.py
+    - README.md
+    - tests/test_rates.py
+    - tests/test_aggregate.py
+    - tests/test_reader_claude.py
+    - tests/test_reader_codex.py
+    - tests/test_cli.py
+    - tests/test_measure_v1_contract.py
+    - tests/fixtures/measure-v1-contract/UPSTREAM
+  required_docs: []
+  confidence: high
+  open_questions:
+    - >-
+      measure/v1 契約の正本（docs/protocols/measure-v1.md）は ai-agent-skills-playbook 側の
+      リポジトリにあり、agent-cost のリポジトリ外。当該ファイルへの provenance は
+      source_kind=review_memory とし、content_digest は形式検証のみ（git blob 照合不可）
+      になる点を corpus 側に明記する。
+  allowed_paths:
+    - "docs/claims/**"
+  forbidden_paths:
+    - "agent_cost/**"
+    - "tests/**"
