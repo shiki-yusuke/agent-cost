@@ -27,9 +27,9 @@
     {
       "phase": "3_implement",
       "started_at": "2026-08-14T16:15:31.219Z",
+      "ended_at": "2026-08-14T16:16:02.157Z",
       "result": "completed",
-      "retry_count": 0,
-      "ended_at": "2026-08-14T16:16:02.157Z"
+      "retry_count": 0
     },
     {
       "phase": "4_verify",
@@ -78,7 +78,33 @@
     }
   ],
   "mode_resolution_log": [],
-  "cost_ledger": [],
+  "cost_ledger": [
+    {
+      "ledger_entry_id": "lc_d8375da5564e",
+      "lane_id": "I-2026-08-15-agent-cost-claims-corpus",
+      "scope": "phase",
+      "phase": "1_intent",
+      "source": "claude_jsonl_auto",
+      "session_ids": [
+        "68a0aca5-87e3-40c5-8b2e-b102162cd985"
+      ],
+      "data_state": "has_usage",
+      "confidence": "imported_windowed",
+      "included_in_kpi": true,
+      "tokens": 34297463,
+      "turns": null,
+      "cost_usd": 10.623839,
+      "cost_credits": 0,
+      "pricing_version": "2026-07-29",
+      "pricing_as_of": "2026-08-14T16:16:47.164257+00:00",
+      "imported_at": "2026-08-14T16:16:23.773Z",
+      "since": "2026-08-14T15:56:10.530Z",
+      "until": "2026-08-14T16:16:23.773Z",
+      "agents": [
+        "claude"
+      ]
+    }
+  ],
   "usage_import_attempts": [],
   "usage_import_gate_overrides": []
 }
