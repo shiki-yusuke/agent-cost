@@ -26,7 +26,7 @@ intent:
   declared_risk: low
 premise_evidence:
   required: true
-  method: static_trace
+  method: code-only
   reproduced: true
   evidence: >-
     docs/claims/gaps.yaml の GAP-01 が指す agent_cost/readers/claude.py#parse_session_facts
