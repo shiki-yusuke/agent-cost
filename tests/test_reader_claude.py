@@ -123,6 +123,41 @@ def test_cache_creation_without_ttl_breakdown_is_unknown(tmp_path):
     assert "cache_write_1h" not in kinds
 
 
+def test_cache_creation_partial_ttl_breakdown_leftover_is_unknown(tmp_path):
+    # Regression for GAP-01: cache_creation is a dict (TTL breakdown present)
+    # but its two counters sum to less than cache_creation_input_tokens. The
+    # shortfall (leftover) must still surface as cache_write_unknown,
+    # alongside the 5m/1h facts for the portion that *was* broken down.
+    jsonl = tmp_path / "s3b.jsonl"
+    write_jsonl(
+        jsonl,
+        [
+            _event(
+                type="assistant",
+                timestamp="2026-06-01T00:00:00Z",
+                sessionId="s3b",
+                message={
+                    "model": "claude-opus-4-8",
+                    "usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "cache_creation_input_tokens": 300,
+                        "cache_creation": {
+                            "ephemeral_5m_input_tokens": 150,
+                            "ephemeral_1h_input_tokens": 100,
+                        },
+                    },
+                },
+            ),
+        ],
+    )
+    facts, _ = parse_session_facts(jsonl)
+    kinds = {f.token_kind: f.tokens for f in facts}
+    assert kinds["cache_write_5m"] == 150
+    assert kinds["cache_write_1h"] == 100
+    assert kinds["cache_write_unknown"] == 50
+
+
 def test_mixed_speed_modes(tmp_path):
     jsonl = tmp_path / "s5.jsonl"
     write_jsonl(

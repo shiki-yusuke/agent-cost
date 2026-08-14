@@ -1,0 +1,51 @@
+schema_version: "1.0"
+intent_id: I-2026-08-15-ac-gap01-claude-reader-ttl-leftover
+test_matrix:
+  - ears_rule: R2-R3
+    test_type: unit
+    test_name: test_cache_creation_partial_ttl_breakdown_leftover_is_unknown
+    status: added
+    note: 対象分岐の回帰テスト。子セッションと main が独立に pytest green を確認
+test_gaps: []
+manual_verification: []
+goal_stopping_condition:
+  - success_criteria_matrix 全行が covered_by none 以外
+spec_consensus:
+  spec_ssot_ref: docs/spec/I-2026-08-15-ac-gap01-claude-reader-ttl-leftover/spec.md
+  spec_digest: 0217af3a7caadc5cd8277252897d1753e208f67b48dcf9040e13565f3687325f
+  verification_digest: dc52cca315d893fffcdde607938c704ecc655e439128bd3dc3219525d5a3961b
+  deviations: []
+  reviewer_ack:
+    reviewer_kind: independent_agent
+    reviewer_id: claude-fable-main
+    acked_at: 2026-08-14T16:40:41.784Z
+    spec_sha256: 0217af3a7caadc5cd8277252897d1753e208f67b48dcf9040e13565f3687325f
+    verification_sha256: dc52cca315d893fffcdde607938c704ecc655e439128bd3dc3219525d5a3961b
+success_criteria_matrix:
+  - criterion: 内訳合計 < cache_creation_input_tokens のとき leftover が cache_write_unknown
+      として計上されることを検証するテストが存在する
+    covered_by: test
+    evidence: 新規 test_cache_creation_partial_ttl_breakdown_leftover_is_unknown が
+      leftover→cache_write_unknown を assert
+    negation_test: assert を反転すれば red（対象分岐を実際に通る）
+  - criterion: cache_creation の内訳情報が全く無いとき全量が cache_write_unknown
+      になることを検証するテスト（既存カバレッジ含む）が存在する
+    covered_by: test
+    evidence: 既存 test_cache_creation_without_ttl_breakdown_is_unknown がカバー（重複追加を自制）
+    negation_test: 既存テストの削除で red
+  - criterion: 内訳合計 = cache_creation_input_tokens のとき cache_write_unknown
+      が計上されない（leftover 0）ことを検証するテスト（既存カバレッジ含む）が存在する
+    covered_by: test
+    evidence: 既存 test_cache_creation_ttl_breakdown_present がカバー（重複追加を自制）
+    negation_test: 既存テストの削除で red
+  - criterion: pytest が全 green である
+    covered_by: test
+    evidence: 108 passed（子セッション + main 独立実行）
+    negation_test: 任意のテスト失敗で red
+  - criterion: agent_cost/** の実装コードは変更していない
+    covered_by: diff
+    evidence: git diff --stat main..HEAD が tests/ と docs/spec/ のみ
+    negation_test: 実装ファイルが diff に現れれば即検出
+cross_check_intent_vs_spec:
+  performed_at: 2026-08-15 (Phase 3→4)
+  finding: intent.success 全行 ↔ matrix を1対1突合（行順一致）、過不足なし

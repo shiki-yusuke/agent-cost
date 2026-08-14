@@ -1,0 +1,30 @@
+schema_version: "1.0"
+intent_id: I-2026-08-15-ac-gap01-claude-reader-ttl-leftover
+decision: pass
+confidence: high
+halt_triggers:
+  - condition: 実装コード（agent_cost/**）を変更してしまう
+    triggered: false
+    evidence: git diff --stat main..HEAD が tests/ と docs/spec/ のみ
+per_lens:
+  - lens_id: lifecycle_management
+    result: not_applicable
+  - lens_id: error_handling
+    result: not_applicable
+  - lens_id: security
+    result: not_applicable
+  - lens_id: performance
+    result: not_applicable
+  - lens_id: a11y
+    result: not_applicable
+  - lens_id: i18n
+    result: not_applicable
+  - lens_id: architecture
+    result: not_applicable
+  - lens_id: test_coverage
+    result: applicable
+    finding: gaps.yaml で特定済みの未カバー分岐に回帰テストを追加（test_cache_creation_partial_ttl_breakdown_leftover_is_unknown）。既存カバー済みケースへの重複追加は自制
+    taxonomy: test_missing
+  - lens_id: documentation
+    result: not_applicable
+missing_scenarios: []
