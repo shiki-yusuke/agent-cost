@@ -1,0 +1,56 @@
+schema_version: "1.0"
+intent_id: I-2026-08-15-ac-gap02-pricing-status-aggregation
+execution_mode: manual
+budget: []
+intent:
+  business_goal: pricing_status の行内最悪値集計（unpriced < lower_bound < priced の劣後順）の回帰検知を可能にする
+  user_visible_intent: >-
+    docs/claims/gaps.yaml GAP-02 で特定された未検証の半分（lower_bound と priced が
+    同一行に混在するケース）を含む、build_rows の pricing_status ランキングの回帰テストを追加する
+  success:
+    - "①priced のみの facts から成る行の pricing_status が priced になることを確認するテストがある"
+    - "②priced と lower_bound（cache_write_unknown 由来）が混在する行の pricing_status が lower_bound になることを確認するテストがある（GAP-02 が指摘した未検証半分）"
+    - "③lower_bound と unpriced が混在する行の pricing_status が unpriced になることを確認するテストがある"
+    - "④同じ facts 集合でも構築順（入力順）を入れ替えれば pricing_status の結果が変わらないことを確認するテストがある"
+    - pytest がリポジトリ全体で green である
+    - コミットメッセージに AC-GAP-02 を含む
+  non_goal:
+    - agent_cost/** の実装コードを変更すること（テスト追加のみ）
+    - GAP-02 以外の gaps.yaml エントリ（GAP-01, GAP-03）への対応
+    - 実装バグが見つかった場合にその場で修正すること（現挙動をテストで固定し報告に明記するのみ、修正は人間判断）
+  constraints:
+    - agent_cost/** は変更しない。tests/** への追加のみ
+    - 既存の tests/test_aggregate.py の流儀（_fact() ヘルパー、load_rates() 使用）に従う
+    - pytest 全 green を維持する
+    - コミットメッセージに AC-GAP-02 を含める
+  primary_user: agent-cost メンテナ
+  state_segments: []
+  known_affected_behavior: []
+  declared_risk: low
+premise_evidence:
+  required: true
+  reason: >-
+    このタスクは「実装が実際にそうなっている」という前提（_STATUS_RANK が
+    unpriced=0 < lower_bound=1 < priced=2 の順で、build_rows が同一バケット内の
+    最悪値へ行を降格させること）に依存する回帰テストを追加するため、着手前に
+    実装とテストを直接読んで premise の実在を確認した。
+  evidence:
+    - "agent_cost/aggregate.py:20 — _STATUS_RANK = {\"unpriced\": 0, \"lower_bound\": 1, \"priced\": 2} を確認"
+    - "agent_cost/aggregate.py:173-174 — build_rows が _STATUS_RANK[status] < _STATUS_RANK[row.pricing_status] の場合のみ行を降格させる（＝行内最悪値へ一方向に収束し、入力順に依存しない）ことを確認"
+    - "tests/test_aggregate.py — grep で lower_bound/_STATUS_RANK を検索し、既存テストは test_price_fact_cache_write_unknown_is_lower_bound（単体の price_fact のみ）と test_build_rows_mixed_priced_and_unpriced_marks_row_unpriced（unpriced×priced の混在のみ）に留まり、lower_bound×priced の行内混在および入力順不変性を確認するテストが存在しないことを確認 — GAP-02 の記述と一致"
+    - "docs/claims/gaps.yaml GAP-02 の evidence_ref（agent_cost/aggregate.py#_STATUS_RANK,build_rows; tests/test_aggregate.py）と実ファイルの行番号・内容が一致することを確認"
+ai_inferred_scope:
+  affected_layers:
+    - tests
+  related_files:
+    - agent_cost/aggregate.py
+    - tests/test_aggregate.py
+    - docs/claims/gaps.yaml
+  required_docs:
+    - docs/claims/gaps.yaml
+  confidence: high
+  open_questions: []
+  allowed_paths:
+    - "tests/**"
+  forbidden_paths:
+    - "agent_cost/**"
