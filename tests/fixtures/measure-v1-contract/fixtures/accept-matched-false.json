@@ -1,0 +1,42 @@
+{
+  "protocol_version": "measure/v1",
+  "generated_at": "2026-08-14T00:00:00+00:00",
+  "window": { "since": null, "until": null },
+  "timezone": "UTC",
+  "agent": ["claude", "codex"],
+  "rates": {
+    "catalog_version": "2026-07-29",
+    "sha256": "5d86e11b3c953f03df6841ac5c48a4ac6a90701e60f24b42e814ce9ba47c25e9"
+  },
+  "session_ids": ["no-such-session"],
+  "sessions": {
+    "no-such-session": {
+      "matched": false,
+      "rows": [],
+      "totals": {
+        "tokens": 0,
+        "priced_tokens": 0,
+        "unpriced_tokens": 0,
+        "estimated_cost_usd": 0.0,
+        "credits": 0.0
+      }
+    }
+  },
+  "total": {
+    "rows": [],
+    "totals": {
+      "tokens": 0,
+      "priced_tokens": 0,
+      "unpriced_tokens": 0,
+      "estimated_cost_usd": 0.0,
+      "credits": 0.0
+    }
+  },
+  "data_quality": {
+    "malformed_events": 0,
+    "skipped_files": 0,
+    "negative_deltas": 0,
+    "unpriced_tokens": 0,
+    "source_quality": { "ok": 0, "first_event_delta": 0 }
+  }
+}
