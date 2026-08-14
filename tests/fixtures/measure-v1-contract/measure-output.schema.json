@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shiki-yusuke/ai-agent-skills-playbook/contracts/measure/v1/measure-output.schema.json",
+  "title": "measure/v1 output",
+  "description": "The JSON payload agent-cost's `measure --format json` prints on stdout (exit 0). This is the cross-language conformance schema for D11 (multi-language stack support): agent-cost (Python, the producer and normative implementation) and any consumer written in another language (e.g. spec-lane's TypeScript AgentCostTelemetryAdapter) must agree on this exact shape. The schema was written by running agent-cost's actual `measure` command and reading agent_cost/cli.py's cmd_measure (payload construction), agent_cost/aggregate.py's Row.to_dict()/rows_totals(), and agent_cost/facts.py's SOURCE_QUALITY_VALUES directly -- it is a transcription of the real, current output, not a spec written from a description of intended behavior. The prose contract (what each field means, why measure exists, exit-code semantics) lives in agent-cost's own README (\"Machine consumption: agent-cost measure\" section) -- see docs/protocols/measure-v1.md for how that division of ownership works and why this schema does not duplicate that prose. DELIBERATELY UNLIKE every other contract in this repo (trace/v1, attribution/v1, estimate/v2, agent-metrics/v1), no object here sets `additionalProperties: false` -- see 'Open vs. closed schema' below. REQUIRED-FLOOR POLICY (sol review, compatibility floor -- not an immutable freeze): every key currently listed in a `required` array here is fixed for the lifetime of v1 -- it may never be REMOVED from `required` without a v2 (that would let a payload silently drop a field an existing consumer depends on), and a field that is optional today may never become required within v1 either (that would reject a still-valid OLDER producer's output that predates the new field -- the actual bug this floor policy exists to prevent). A brand-new field introduced by a future additive agent-cost change is added to `properties` as OPTIONAL (never to `required`) until/unless a `measure/v2` makes it part of the floor. See docs/protocols/measure-v1.md's Versioning section. Rules this schema alone cannot express, enforced instead as semantic checks in verify-fixtures.mjs: (1) every row's `tokens` MUST equal `priced_tokens + unpriced_tokens`. (2) a row's `pricing_status` MUST be \"unpriced\" if and only if its `unpriced_tokens > 0` (agent_cost/aggregate.py's build_rows ranks unpriced as the worst status and it wins outright the moment any one fact in the bucket is unpriced -- see that function's docstring). (3) a `totals` object (whether a session's or the top-level `total`'s) MUST equal the recomputed sum of its own `rows`. (4) the top-level `total.totals` MUST equal the sum, across every requested session, of that session's own `totals` (measure's `total` is the union of exactly the requested sessions, never a broader report). (5) `session_ids` and the keys of `sessions` MUST be the same set. (6) the top-level `data_quality.unpriced_tokens` MUST equal the sum of `total.rows[].unpriced_tokens`. (7) a session entry with `matched: false` MUST have an empty `rows` array and all-zero `totals` -- \"no usage matched\" and \"usage matched but happened to net to zero\" are different facts, and this schema alone cannot compare `matched` against its siblings. (8) the top-level `total.rows` MUST equal the (agent, model, token_kind)-dimensional re-aggregation of the union of every `sessions[*].rows` -- not just a scalar totals sum (check 4 above): two payloads can have identical `total.totals` scalars while `total.rows` attributes the same tokens to the wrong `agent`/`model`/`token_kind` bucket, which check 4 alone cannot catch. (9) the personal-dimension scan (contracts/shared/personal-dimensions.mjs) -- measure/v1 carries no per-actor identity at all, so any forbidden key anywhere in the payload is a contamination; this check does not depend on `additionalProperties` and still catches contamination in an open schema. Open vs. closed schema: agent-cost's own README states measure/v1's real versioning policy -- 'Within a major version, only additive changes (new fields) are made; a field being removed or changing meaning bumps the version.' A closed (`additionalProperties: false`) schema, the pattern this repo otherwise uses for its own playbook-owned/frozen protocols, would reject a legitimately current `measure/v1` payload the moment agent-cost adds a field under that policy -- a false-positive conformance failure against the real producer. This mirrors spec-lane's own `AgentCostRowSchema`/`AgentCostMeasureResultSchema` (packages/schemas/src/agent-cost.ts), which already use `.passthrough()`/unknown-key-tolerant parsing for exactly this reason. `required` is still enforced in full -- this schema only stops short of forbidding *extra* keys, it never stops checking for the documented minimum set (and, per the required-floor policy above, never grows that minimum set within v1 either).",
+  "type": "object",
+  "required": [
+    "protocol_version",
+    "generated_at",
+    "window",
+    "timezone",
+    "agent",
+    "rates",
+    "session_ids",
+    "sessions",
+    "total",
+    "data_quality"
+  ],
+  "properties": {
+    "protocol_version": { "const": "measure/v1" },
+    "generated_at": {
+      "type": "string",
+      "description": "Python's `datetime.now(timezone.utc).isoformat()` -- always a numeric UTC offset (\"+00:00\"), never a \"Z\" suffix (that is only how request-side --since/--until accept input; it is never what agent-cost itself emits on output).",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?\\+00:00$"
+    },
+    "window": {
+      "type": "object",
+      "description": "The --since/--until bounds actually applied, echoed back as the exact instant agent-cost resolved them to (not the caller's raw input string). Both null when the corresponding flag was omitted -- an unbounded window is never represented as an arbitrary sentinel date.",
+      "required": ["since", "until"],
+      "properties": {
+        "since": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?\\+00:00$" },
+        "until": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?\\+00:00$" }
+      }
+    },
+    "timezone": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The --timezone value as given (e.g. \"UTC\", \"Asia/Tokyo\"); only affects date-only --since/--until parsing, since measure never buckets rows by month."
+    },
+    "agent": {
+      "type": "array",
+      "description": "The resolved --agent filter, sorted (agent_cost/cli.py: `sorted(agents)`) -- both agents when --agent was omitted.",
+      "items": { "enum": ["claude", "codex"] },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "rates": {
+      "type": "object",
+      "required": ["catalog_version", "sha256"],
+      "properties": {
+        "catalog_version": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "session_ids": {
+      "type": "array",
+      "description": "The requested --session-id values, in the order given, de-duplicated (agent_cost/cli.py: `list(dict.fromkeys(...))`). Always at least one -- measure exits 2 before producing any output if none was given.",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "sessions": {
+      "type": "object",
+      "description": "One entry per requested session_id, keyed by that session_id. A session with no matching usage at all still gets an entry here (matched: false, empty rows, all-zero totals) -- measure never omits a requested session_id from this map.",
+      "additionalProperties": { "$ref": "#/$defs/sessionEntry" }
+    },
+    "total": {
+      "type": "object",
+      "description": "The union of every requested session's facts, re-aggregated by agent/model/token-kind (never by session, never by month) -- NOT a global report over all locally recorded usage.",
+      "required": ["rows", "totals"],
+      "properties": {
+        "rows": { "type": "array", "items": { "$ref": "#/$defs/row" } },
+        "totals": { "$ref": "#/$defs/totals" }
+      }
+    },
+    "data_quality": {
+      "type": "object",
+      "required": ["malformed_events", "skipped_files", "negative_deltas", "unpriced_tokens", "source_quality"],
+      "properties": {
+        "malformed_events": { "type": "integer", "minimum": 0 },
+        "skipped_files": { "type": "integer", "minimum": 0 },
+        "negative_deltas": { "type": "integer", "minimum": 0 },
+        "unpriced_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Sum of total.rows[].unpriced_tokens -- scoped to the requested sessions, same as every other field here, never a global figure."
+        },
+        "source_quality": {
+          "type": "object",
+          "description": "One count per agent_cost/facts.py SOURCE_QUALITY_VALUES entry, scoped to facts belonging to the requested sessions only (agent_cost/cli.py builds this from `combined_facts`, not from every locally recorded fact). SOURCE_QUALITY_VALUES MAY grow a new named value in a future additive change (same policy as the rest of this payload); `ok`/`first_event_delta` are the current, required minimum, not a closed ceiling.",
+          "required": ["ok", "first_event_delta"],
+          "properties": {
+            "ok": { "type": "integer", "minimum": 0 },
+            "first_event_delta": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sessionEntry": {
+      "type": "object",
+      "required": ["matched", "rows", "totals"],
+      "properties": {
+        "matched": { "type": "boolean" },
+        "rows": { "type": "array", "items": { "$ref": "#/$defs/row" } },
+        "totals": { "$ref": "#/$defs/totals" }
+      }
+    },
+    "row": {
+      "type": "object",
+      "description": "agent_cost/aggregate.py's Row.to_dict(). measure always groups by (agent, model, token-kind) and never by month (agent_cost/cli.py: `group_by = (\"agent\", \"model\", \"token-kind\")`), so `month` is always null on every row measure emits -- unlike `report`, which does bucket by month and would populate it.",
+      "required": [
+        "month",
+        "agent",
+        "model",
+        "token_kind",
+        "tokens",
+        "priced_tokens",
+        "unpriced_tokens",
+        "estimated_cost_usd",
+        "credits",
+        "pricing_status"
+      ],
+      "properties": {
+        "month": { "const": null },
+        "agent": { "enum": ["claude", "codex"] },
+        "model": { "type": "string", "minLength": 1 },
+        "token_kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "OPEN, not a closed enum -- unlike `agent`/`pricing_status` below. Currently-known values (agent_cost/facts.py's TOKEN_KINDS): input_nocache, cache_read, cache_write_5m, cache_write_1h, cache_write_unknown, output. A new token_kind is exactly the kind of additive change agent-cost's own versioning policy allows within v1 without a version bump (same as a new top-level/nested field), so this schema only requires a non-empty string, never membership in the current set -- an enum here would make the schema itself the breaking change the moment agent-cost adds one. See docs/protocols/measure-v1.md's 'Known token_kind values are producer/contract/consumer, not one shared verdict' for why a *consumer* is still free to fail closed on an unrecognized value even though this schema and agent-cost itself both accept it."
+        },
+        "tokens": { "type": "integer", "minimum": 0 },
+        "priced_tokens": { "type": "integer", "minimum": 0 },
+        "unpriced_tokens": { "type": "integer", "minimum": 0 },
+        "estimated_cost_usd": { "type": "number", "minimum": 0 },
+        "credits": { "type": "number", "minimum": 0 },
+        "pricing_status": { "enum": ["unpriced", "lower_bound", "priced"] }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "description": "agent_cost/aggregate.py's rows_totals() -- a plain sum of a set of rows, currently exactly these 5 keys (open to an additive 6th under agent-cost's own versioning policy -- see this schema's top-level description).",
+      "required": ["tokens", "priced_tokens", "unpriced_tokens", "estimated_cost_usd", "credits"],
+      "properties": {
+        "tokens": { "type": "integer", "minimum": 0 },
+        "priced_tokens": { "type": "integer", "minimum": 0 },
+        "unpriced_tokens": { "type": "integer", "minimum": 0 },
+        "estimated_cost_usd": { "type": "number", "minimum": 0 },
+        "credits": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}
