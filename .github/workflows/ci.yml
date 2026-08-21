@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # pyproject の classifiers が宣言しているバージョンと一致させる。
+        # 宣言だけして検証しない状態を作らないため、行を増やす時は classifiers も直す。
+        python: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+          python -m pip install -e .
+      - name: Test
+        run: python -m pytest -q
+      - name: CLI smoke
+        run: |
+          agent-cost --help
+          agent-cost report --help
+
+  package:
+    name: Packaged install smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+      - name: Install the wheel in a clean venv and run the CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv/bin/python" -m pip install dist/*.whl
+          # checkout 直下の agent_cost/ が入った状態で叩くと、何を検査しているのかが
+          # 曖昧になる。リポジトリ外へ移動して「入れた wheel だけ」を対象にする。
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/venv/bin/agent-cost" --help
+          # rates.json は package-data。同梱されていないと report は traceback で exit 1 になる
+          # (この検査が空振りでないことは、venv 側の rates.json を消して exit 1 を確認済み)
+          "$RUNNER_TEMP/venv/bin/agent-cost" report --since 2026-01-01 --format json > /dev/null
