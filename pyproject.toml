@@ -12,6 +12,14 @@ requires-python = ">=3.9"
 authors = [
     { name = "shiki-yusuke" },
 ]
+keywords = [
+    "ai-agents",
+    "claude-code",
+    "codex-cli",
+    "cost-estimation",
+    "local-first",
+    "token-usage",
+]
 dependencies = []
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -29,6 +37,8 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/shiki-yusuke/agent-cost"
+Repository = "https://github.com/shiki-yusuke/agent-cost"
+Issues = "https://github.com/shiki-yusuke/agent-cost/issues"
 
 [project.scripts]
 agent-cost = "agent_cost.cli:main"
