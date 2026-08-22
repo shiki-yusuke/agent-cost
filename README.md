@@ -1,29 +1,86 @@
 # agent-cost
 
-> PyPI distribution: [`coding-agent-cost`](https://pypi.org/project/coding-agent-cost/) — the
-> command (`agent-cost`) and import name (`agent_cost`) are unchanged. The name `agent-cost`
-> itself is blocked by PyPI's name-similarity rule against `agentcost`, an unrelated project
-> by a different author; this tool is not affiliated with it.
+> A small, local accounting primitive for Claude Code and Codex CLI usage. It reads the logs
+> already on your machine, makes no network calls, and refuses to guess when the data cannot
+> support a price or attribution.
 
-Estimate how many tokens Claude Code and Codex CLI actually used, and roughly
-what that cost, by reading the local logs those tools already write to your
-machine.
+Estimate how many tokens your coding-agent sessions actually used and roughly what that usage
+would cost at the bundled list prices. On macOS and Linux environments with IANA timezone data,
+no account, service, or project configuration is required. See the platform note below for
+minimal Windows Python environments.
 
-## Quick start
+## Try it in under 60 seconds
+
+With [`uvx`](https://docs.astral.sh/uv/guides/tools/), no persistent install is needed:
 
 ```bash
-pip install coding-agent-cost   # or, from a checkout: pip install -e .
-agent-cost doctor         # sanity-check log locations and the rate catalog
+uvx --from coding-agent-cost agent-cost doctor
+uvx --from coding-agent-cost agent-cost report
+```
+
+The first command checks the expected local paths, the Codex database, and the bundled rate
+catalog. It does not open every Claude JSONL file. The second command performs the real scan,
+prints the result, and exposes unreadable inputs in `data_quality.skipped_files`. This path was
+exercised on macOS from a clean temporary directory against the published `0.1.0` package on
+2026-08-23.
+
+The rejection path is equally direct and reproducible. Ask the published package about a model
+the catalog does not contain:
+
+```console
+$ uvx --from coding-agent-cost agent-cost rates show --model model-not-in-catalog
+[unpriced] no rate entry for 'model-not-in-catalog'
+```
+
+`report` and `measure` preserve the same condition as `pricing_status: "unpriced"` with a
+separate `unpriced_tokens` count. A numeric zero in the estimate field is therefore not a claim
+that the usage was free.
+
+Prefer a persistent command? Install the PyPI distribution, then run the same two commands:
+
+```bash
+pip install coding-agent-cost
+agent-cost doctor
 agent-cost report
 ```
 
-`agent-cost report` scans `~/.claude/projects/**/*.jsonl` and
-`~/.codex/state_5.sqlite` (+ its rollout files), turns every token-usage
-event into a canonical "fact" (one model, one token kind, one timestamp,
-one count), prices each fact against a bundled rate catalog, and prints an
-aggregated table:
+The PyPI distribution is named [`coding-agent-cost`](https://pypi.org/project/coding-agent-cost/),
+while the command remains `agent-cost` and the import remains `agent_cost`. The shorter PyPI
+name is unavailable because of PyPI's similarity rule; this project is not affiliated with the
+unrelated `agentcost` distribution.
 
-```
+## Why this exists
+
+Many usage trackers are designed as rich, convenient dashboards. That can be the right choice
+when broad agent coverage and interactive exploration matter most. `agent-cost` is for a
+different trust model:
+
+- **Local-first and zero-network:** source logs stay on disk; the package has zero runtime
+  dependencies.
+- **Auditable:** token facts, the versioned rate catalog, its digest, and data-quality counters
+  are available for inspection and machine consumption.
+- **Fail-closed pricing:** unknown models remain `unpriced`; ambiguous cache-write TTLs are
+  labeled `lower_bound` instead of silently receiving a best-guess price.
+- **Explicit attribution boundary:** `measure` accepts named session ids, but agent-cost does
+  not infer a task from a branch or PR. A workflow such as
+  [`spec-lane`](https://github.com/shiki-yusuke/spec-lane) can own the session-to-task binding
+  and consume the versioned JSON result.
+
+This is not a claim that local CLI accounting is universally better than a dashboard. It is a
+smaller primitive for environments where data egress, dependency surface, custom metrics, or
+task attribution need to remain under the operator's control.
+
+See [Choosing by use case and trust model](https://github.com/shiki-yusuke/agent-cost/blob/main/docs/comparison.md)
+for a dated, source-linked comparison with broader CLI trackers, local dashboards, and
+observability stacks.
+
+## Report and export
+
+`agent-cost report` turns each local usage event into a canonical fact (one model, one token
+kind, one timestamp, one count), prices each fact against the bundled rate catalog, and prints
+an aggregated table:
+
+```bash
 agent-cost report --since 2026-06-01 --until 2026-07-01 --format table
 agent-cost report --group-by month,agent --format csv
 agent-cost report --format json > usage.json
@@ -34,6 +91,11 @@ Useful flags: `--since`/`--until` (half-open window; date-only values are
 interpreted in `--timezone`, default UTC), `--agent claude,codex`,
 `--group-by month,agent,model,token-kind`, `--rates PATH` (use a different
 catalog entirely, see below), `--exclude-archived` (Codex threads).
+
+**Platform note:** `report`, `export`, and `measure` use Python's IANA timezone database even
+when the timezone is `UTC`. macOS and typical Linux installations provide it through the
+operating system. A minimal Windows Python environment may require `pip install tzdata` first;
+`tzdata` is not currently a declared package dependency.
 
 If another program wants to parse agent-cost's output for one or more
 specific session ids, see `agent-cost measure` below rather than
