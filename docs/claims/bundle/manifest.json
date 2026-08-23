@@ -1,5 +1,5 @@
 {
-  "corpus_digest": "4e9373970f7d72c8d8a0a2329f11baf13e0cd12467041228f2b8fca0549780a3",
+  "corpus_digest": "39ab3fc5d13d55a71274606feed40778043b3b6a8bea6e0d7b377f561ccb2104",
   "counts": {
     "by_claim_kind": {
       "behavior": 8,
@@ -27,5 +27,5 @@
     "name": "evidence-docs",
     "version": "0.1.0"
   },
-  "repo_commit": "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+  "repo_commit": "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
 }

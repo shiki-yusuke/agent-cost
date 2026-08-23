@@ -22,26 +22,26 @@ observations:
         uri: tests/test_aggregate.py
         selector: test_price_fact_unknown_model_is_unpriced
         content_digest: "4fa19557fb67f561bd959564173e7f05ba63205d1871683f11d9ff521956b34a"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
       - source_kind: test
         uri: tests/test_aggregate.py
         selector: test_price_fact_codex_cache_write_is_unpriced
         content_digest: "4fa19557fb67f561bd959564173e7f05ba63205d1871683f11d9ff521956b34a"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
       - source_kind: test
         uri: tests/test_rates.py
         selector: test_gpt_5_5_cache_write_is_unpriced
         content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
     supporting_refs: []
     contradicting_refs: []
-    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    valid_at_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
     affected_paths:
       - agent_cost/aggregate.py
 
@@ -64,12 +64,12 @@ observations:
         uri: tests/test_aggregate.py
         selector: test_build_rows_mixed_priced_and_unpriced_marks_row_unpriced
         content_digest: "4fa19557fb67f561bd959564173e7f05ba63205d1871683f11d9ff521956b34a"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
     supporting_refs: []
     contradicting_refs: []
-    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    valid_at_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
     affected_paths:
       - agent_cost/aggregate.py
 
@@ -100,12 +100,12 @@ observations:
         uri: agent_cost/aggregate.py
         selector: _STATUS_RANK
         content_digest: "a2d26673aa9122f441c92c4d1fe7662bfa6dceda98a862ae7136114f45a8cb8c"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-source
         observed_at: "2026-08-15T00:00:00Z"
     supporting_refs: []
     contradicting_refs: []
-    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    valid_at_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
     affected_paths:
       - agent_cost/aggregate.py
 
@@ -130,11 +130,11 @@ observations:
         uri: tests/test_aggregate.py
         selector: test_build_rows_unknown_model_is_unpriced_and_flagged
         content_digest: "4fa19557fb67f561bd959564173e7f05ba63205d1871683f11d9ff521956b34a"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
     supporting_refs: []
     contradicting_refs: []
-    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    valid_at_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
     affected_paths:
       - agent_cost/aggregate.py

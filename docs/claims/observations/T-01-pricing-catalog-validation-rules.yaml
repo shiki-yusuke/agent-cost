@@ -22,33 +22,33 @@ observations:
         uri: tests/test_rates.py
         selector: test_unsupported_schema_version_raises
         content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
       - source_kind: test
         uri: tests/test_rates.py
         selector: test_unsupported_currency_raises
         content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
       - source_kind: test
         uri: tests/test_rates.py
         selector: test_unsupported_unit_raises
         content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
       - source_kind: source
         uri: agent_cost/rates.py
         selector: _validate_and_build
         content_digest: "d725baf8709df0732327aae58d8226dd943e3f2813d07ab361b740c02649d5ed"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-source
         observed_at: "2026-08-15T00:00:00Z"
     supporting_refs: []
     contradicting_refs: []
-    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    valid_at_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
     affected_paths:
       - agent_cost/rates.py
 
@@ -74,26 +74,26 @@ observations:
         uri: tests/test_rates.py
         selector: test_duplicate_model_key_raises
         content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
       - source_kind: test
         uri: tests/test_rates.py
         selector: test_alias_colliding_with_model_key_raises
         content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
       - source_kind: test
         uri: tests/test_rates.py
         selector: test_duplicate_alias_raises
         content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
     supporting_refs: []
     contradicting_refs: []
-    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    valid_at_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
     affected_paths:
       - agent_cost/rates.py
 
@@ -118,25 +118,25 @@ observations:
         uri: tests/test_rates.py
         selector: test_overlapping_rate_periods_raise
         content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
       - source_kind: test
         uri: tests/test_rates.py
         selector: test_adjacent_non_overlapping_periods_are_ok
         content_digest: "440f06b2791b2326117807aaf47ea8889dcf552efa482b8f2593a7bd79fc01fd"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
       - source_kind: source
         uri: agent_cost/rates.py
         selector: _build_model_entry
         content_digest: "d725baf8709df0732327aae58d8226dd943e3f2813d07ab361b740c02649d5ed"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-source
         observed_at: "2026-08-15T00:00:00Z"
     supporting_refs: []
     contradicting_refs: []
-    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    valid_at_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
     affected_paths:
       - agent_cost/rates.py

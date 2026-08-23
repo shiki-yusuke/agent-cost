@@ -1,7 +1,7 @@
 # corpus overview
 
 - generated_at: 2026-08-15T00:00:00Z
-- repo_commit: 4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5
+- repo_commit: 1c74d44903e67e1f65bb28a0b0d39443f48f657b
 - topics: 5
 - observations: 17
 

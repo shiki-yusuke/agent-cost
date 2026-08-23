@@ -7,10 +7,10 @@
 Regenerate with:
 
 ```bash
-evidence-docs generate . --generated-at 2026-08-15T00:00:00Z --repo-commit 4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5
+evidence-docs generate . --generated-at 2026-08-15T00:00:00Z --repo-commit 1c74d44903e67e1f65bb28a0b0d39443f48f657b
 ```
 
-generated_at: `2026-08-15T00:00:00Z` / repo_commit: `4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5`
+generated_at: `2026-08-15T00:00:00Z` / repo_commit: `1c74d44903e67e1f65bb28a0b0d39443f48f657b`
 
 ## Topics
 
@@ -234,7 +234,7 @@ measure/v1's version number, prose contract, and implementation are owned end-to
 - `source` [`agent_cost/cli.py`](../../../agent_cost/cli.py) — MEASURE_PROTOCOL_VERSION
 - `test` [`tests/fixtures/measure-v1-contract/UPSTREAM`](../../../tests/fixtures/measure-v1-contract/UPSTREAM) — Vendored commit / Vendored into
 - `test` [`tests/test_measure_v1_contract.py`](../../../tests/test_measure_v1_contract.py) — module docstring
-- `review_memory` `ai-agent-skills-playbook:docs/protocols/measure-v1.md@d919cce6f29f87ff2e7f143d4759e2a07a7e624b` — “This document is not the contract's normative source” section
+- `review_memory` `ai-agent-skills-playbook:docs/protocols/measure-v1.md@e412ad140f42446b7a0769d4a27fb56d67ab60ca` — “This document is not the contract's normative source” section
 
 <a id="obs-016"></a>
 ### OBS-016 · `behavior` · 🟢 `execution_verified` · ✅ `matched`

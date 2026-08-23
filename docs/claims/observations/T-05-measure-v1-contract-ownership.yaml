@@ -25,33 +25,33 @@ observations:
         uri: agent_cost/cli.py
         selector: MEASURE_PROTOCOL_VERSION
         content_digest: "1817901cd7b1017bc678ffc87fdf6663b4d2899d3214e35da00cf4a654c3c2f8"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-source
         observed_at: "2026-08-15T00:00:00Z"
       - source_kind: test
         uri: tests/fixtures/measure-v1-contract/UPSTREAM
         selector: "Vendored commit / Vendored into"
         content_digest: "de8bab686bc31c97b5c041d70e349e6cc6f23f8d7ead79daec91a17e3b478b18"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-source
         observed_at: "2026-08-15T00:00:00Z"
       - source_kind: test
         uri: tests/test_measure_v1_contract.py
         selector: "module docstring"
         content_digest: "d0f9887148138cb27e60d7fc3d8ab57c8be49a3e6d6397eb1e43e8aba0957615"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-source
         observed_at: "2026-08-15T00:00:00Z"
       - source_kind: review_memory
-        uri: "ai-agent-skills-playbook:docs/protocols/measure-v1.md@d919cce6f29f87ff2e7f143d4759e2a07a7e624b"
+        uri: "ai-agent-skills-playbook:docs/protocols/measure-v1.md@e412ad140f42446b7a0769d4a27fb56d67ab60ca"
         selector: "“This document is not the contract's normative source” section"
         content_digest: not_computed_external_to_repo
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: external-doc-read-not-git-blob-verifiable
         observed_at: "2026-08-15T00:00:00Z"
     supporting_refs: []
     contradicting_refs: []
-    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    valid_at_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
     affected_paths:
       - agent_cost/cli.py
       - tests/fixtures/measure-v1-contract/UPSTREAM
@@ -79,19 +79,19 @@ observations:
         uri: tests/test_measure_v1_contract.py
         selector: test_vendored_accept_fixtures_pass_the_structural_check
         content_digest: "d0f9887148138cb27e60d7fc3d8ab57c8be49a3e6d6397eb1e43e8aba0957615"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
       - source_kind: test
         uri: tests/test_measure_v1_contract.py
         selector: test_vendored_reject_fixtures_fail_the_structural_check
         content_digest: "d0f9887148138cb27e60d7fc3d8ab57c8be49a3e6d6397eb1e43e8aba0957615"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
     supporting_refs: []
     contradicting_refs: []
-    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    valid_at_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
     affected_paths:
       - tests/test_measure_v1_contract.py
 
@@ -121,12 +121,12 @@ observations:
         uri: tests/test_measure_v1_contract.py
         selector: test_live_measure_output_matches_vendored_contract_key_shape
         content_digest: "d0f9887148138cb27e60d7fc3d8ab57c8be49a3e6d6397eb1e43e8aba0957615"
-        repo_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+        repo_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
         extraction_method: static-read-test-assertions
         observed_at: "2026-08-15T00:00:00Z"
     supporting_refs: []
     contradicting_refs: []
-    valid_at_commit: "4260cba446ee1a71d1fc0605e3e2bf8ca8a78ed5"
+    valid_at_commit: "1c74d44903e67e1f65bb28a0b0d39443f48f657b"
     affected_paths:
       - agent_cost/cli.py
       - tests/test_measure_v1_contract.py

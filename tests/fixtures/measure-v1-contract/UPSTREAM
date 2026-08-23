@@ -1,8 +1,9 @@
 Source: ai-agent-skills-playbook, docs/protocols/measure-v1.md + contracts/measure/v1/
-Vendored commit: d919cce6f29f87ff2e7f143d4759e2a07a7e624b (branch feat/measure-v1-contract --
-this contract and its playbook-side companion change land as sibling PRs across
-ai-agent-skills-playbook / agent-cost / spec-lane for issue #51; update this pin to the
-merged main-branch commit once that PR lands)
+Vendored commit: e412ad140f42446b7a0769d4a27fb56d67ab60ca (upstream `main`; see the
+2026-08-23 note below -- the previously pinned branch commit d919cce6 was re-pointed to
+this id, which the upstream history rewrite maps it to, and which is an ancestor of the
+rewritten `main`, finally closing the "update this pin to the merged main-branch commit
+once that PR lands" follow-up this marker had carried since 2026-08-14)
 Vendored at: 2026-08-14 (re-vendored: sol review round -- required-floor policy correction,
 matched:false/dimensional-total semantic checks, open token_kind, 3 new reject fixtures)
 Vendored into: tests/fixtures/measure-v1-contract/
@@ -25,3 +26,11 @@ output structure still matches what the cross-language contract pins, not merely
 repo's own hand-written expectations match its own hand-written implementation (that's what
 test_measure_json_schema_is_locked in tests/test_cli.py already covers, entirely internally).
 See tests/test_measure_v1_contract.py.
+
+2026-08-23 upstream history rewrite: the playbook rewrote its entire published history
+(git filter-repo --mailmap) to remove a corporate email from commit metadata; every commit
+id changed (trees/blobs byte-identical, so the fixture tree hash above is unchanged). The
+pin was re-pointed via the rewrite's old->new commit map (archived at
+~/oss-space/.email-rewrite-20260823/ai-agent-skills-playbook-commit-map.txt); the map sends
+both the old branch commit d919cce6 and old main commit a8363c56 to the same rewritten id,
+confirming the branch tip and the merged main state carried identical content.
