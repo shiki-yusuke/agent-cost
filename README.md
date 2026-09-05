@@ -1,15 +1,24 @@
 # agent-cost
 
-> A small, local accounting primitive for Claude Code and Codex CLI usage. It reads the logs
-> already on your machine, makes no network calls, and refuses to guess when the data cannot
-> support a price or attribution.
+See Claude Code and Codex CLI token usage and estimated costs from the logs already on your
+machine.
 
-Estimate how many tokens your coding-agent sessions actually used and roughly what that usage
-would cost at the bundled list prices. On macOS and Linux environments with IANA timezone data,
-no account, service, or project configuration is required. See the platform note below for
-minimal Windows Python environments.
+Keep pricing gaps visible: unknown models are marked `unpriced`, and cache-write estimates
+with missing TTL information are marked `lower_bound`. JSON reports include the rate catalog
+version and SHA-256 used for the calculation; the catalog records its pricing sources.
 
-## Try it in under 60 seconds
+**These are estimates based on the selected rate catalog, not your actual bill.** The CLI makes
+no runtime network calls and has zero runtime dependencies. On macOS and Linux with IANA
+timezone data, no account, service, or project configuration is required. See the
+[platform note](#report-and-export) for minimal Windows Python environments.
+
+Need the result in another program? [`agent-cost measure`](#machine-consumption-agent-cost-measure)
+returns versioned `measure/v1` JSON for session IDs you supply. Task and PR attribution remain
+the caller's responsibility.
+
+[日本語サマリ](#日本語サマリ) · [Synthetic output example](#synthetic-output-example)
+
+## Try it on your machine
 
 With [`uvx`](https://docs.astral.sh/uv/guides/tools/), no persistent install is needed:
 
@@ -18,23 +27,14 @@ uvx --from coding-agent-cost agent-cost doctor
 uvx --from coding-agent-cost agent-cost report
 ```
 
+The package runner may need network access to download the tool. The CLI itself does not upload
+your logs.
+
 The first command checks the expected local paths, the Codex database, and the bundled rate
 catalog. It does not open every Claude JSONL file. The second command performs the real scan,
 prints the result, and exposes unreadable inputs in `data_quality.skipped_files`. This path was
 exercised on macOS from a clean temporary directory against the published `0.1.0` package on
 2026-08-23.
-
-The rejection path is equally direct and reproducible. Ask the published package about a model
-the catalog does not contain:
-
-```console
-$ uvx --from coding-agent-cost agent-cost rates show --model model-not-in-catalog
-[unpriced] no rate entry for 'model-not-in-catalog'
-```
-
-`report` and `measure` preserve the same condition as `pricing_status: "unpriced"` with a
-separate `unpriced_tokens` count. A numeric zero in the estimate field is therefore not a claim
-that the usage was free.
 
 Prefer a persistent command? Install the PyPI distribution, then run the same two commands:
 
@@ -48,6 +48,78 @@ The PyPI distribution is named [`coding-agent-cost`](https://pypi.org/project/co
 while the command remains `agent-cost` and the import remains `agent_cost`. The shorter PyPI
 name is unavailable because of PyPI's similarity rule; this project is not affiliated with the
 unrelated `agentcost` distribution.
+
+## Synthetic output example
+
+This is **synthetic Claude data**, not observed usage, a bill, or evidence of savings. The
+CLI output below was reproduced with PyPI package `coding-agent-cost==0.1.0` and source
+commit `d170ea301ed0c46351749214bd299e75ae8a7786` (only trailing space padding is omitted).
+The [two-event fixture](examples/synthetic-claude.jsonl) contains known-model input, cache
+writes without a TTL breakdown, and unknown-model input.
+
+```text
+Month    Agent   Model                 Token Kind           Tokens   Priced   Unpriced  Est. Cost (USD)  Credits  Status
+-------  ------  --------------------  -------------------  -------  -------  --------  ---------------  -------  -----------
+2026-06  claude  claude-opus-4-8       cache_write_unknown  1000000  1000000  0         6.2500           -        lower_bound
+2026-06  claude  claude-opus-4-8       input_nocache        1000000  1000000  0         5.0000           -        priced
+2026-06  claude  model-not-in-catalog  input_nocache        500      0        500       0.0000           -        unpriced
+
+Total tokens: 2,000,500   Total estimated cost: $11.2500
+Rates catalog: 2026-07-29  (sha256=5d86e11b3c95...)
+Data quality: malformed_events=0  skipped_files=0  negative_deltas=0  unpriced_tokens=500
+```
+
+- `priced`: $5.0000 is a catalog-based estimate for 1,000,000 input tokens, not a confirmed charge.
+- `lower_bound`: $6.2500 uses the 5-minute cache-write rate because the TTL is missing. This is
+  a lower bound under the catalog and observed token data, not a lower bound on your actual bill.
+- `unpriced`: `0.0000` does not mean free. Read `pricing_status` (the `Status` column) together
+  with `unpriced_tokens` (`Unpriced`): 500 tokens have no price and are excluded from the dollar
+  total. The $11.2500 total also includes the cache-write lower-bound estimate.
+
+<details>
+<summary>Reproduce with synthetic data only (Python 3.9+ and uvx)</summary>
+
+Run from this repository's root. Both log locations and the config file are explicitly set
+inside a temporary directory. Inherited log-location overrides are removed for the child
+process, so it cannot fall back to your real Claude or Codex logs. The temporary data is
+removed when the command exits. The package runner may download the pinned package.
+
+```bash
+python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+fixture = Path("examples/synthetic-claude.jsonl").resolve()
+with tempfile.TemporaryDirectory(prefix="agent-cost-example-") as directory:
+    root = Path(directory)
+    project = root / "claude" / "projects" / "synthetic"
+    project.mkdir(parents=True)
+    (root / "codex").mkdir()
+    shutil.copyfile(fixture, project / "session.jsonl")
+    config = root / "config.json"
+    config.write_text(json.dumps({
+        "claude_home": str(root / "claude"),
+        "codex_home": str(root / "codex"),
+    }))
+    env = dict(os.environ)
+    for key in ("CLAUDE_HOME", "CODEX_HOME", "PYTHONPATH"):
+        env.pop(key, None)
+    env["AGENT_COST_CONFIG"] = str(config)
+    subprocess.run([
+        "uvx", "--from", "coding-agent-cost==0.1.0", "agent-cost",
+        "report", "--agent", "claude", "--since", "2026-06-01",
+        "--until", "2026-06-02", "--format", "table",
+    ], cwd=root, env=env, check=True)
+PY
+```
+
+Use `--format json` in the same command to see the full catalog SHA-256 and field names.
+
+</details>
 
 ## Why this exists
 
