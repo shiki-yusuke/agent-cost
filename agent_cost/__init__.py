@@ -6,4 +6,4 @@ against a versioned rate catalog. Everything happens locally; there are no
 network calls.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
