@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-06-01T00:00:00Z","sessionId":"synthetic-session","message":{"model":"claude-opus-4-8","usage":{"input_tokens":1000000,"output_tokens":0,"cache_creation_input_tokens":1000000}}}
+{"type":"assistant","timestamp":"2026-06-01T00:01:00Z","sessionId":"synthetic-session","message":{"model":"model-not-in-catalog","usage":{"input_tokens":500,"output_tokens":0}}}
