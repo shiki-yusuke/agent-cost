@@ -44,6 +44,124 @@ def _detect_mode(model: Optional[str], collaboration_mode: Optional[str]) -> str
     return "unknown"
 
 
+def _contains_astra(rollout_path: Path, model: Optional[str]) -> bool:
+    """Select the conservative path without trusting the DB's final model.
+
+    A streaming pre-pass also catches Astra -> another-model sessions. Other
+    rollouts retain their existing reader behavior. No token data is collected here.
+    """
+    def astra(value):
+        return isinstance(value, str) and value.startswith("gpt-6-astra")
+
+    if astra(model):
+        return True
+    with rollout_path.open() as fh:
+        for line in fh:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # counted by the main pass
+            if not isinstance(event, dict):
+                continue
+            payload = event.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            settings = payload.get("thread_settings")
+            if astra(payload.get("model")) or (
+                isinstance(settings, dict) and astra(settings.get("model"))
+            ):
+                return True
+    return False
+
+
+class _AstraTurnPricing:
+    """Conservative request-setting attribution for Astra-containing rollouts.
+
+    Codex 0.153.4 emits thread-owned settings before starting a new turn, but
+    standalone updates can also occur while an older request is in flight.
+    Only a matching turn context and a stable, owned snapshot permit pricing.
+    See docs/astra-pricing.md for pinned producer sources and deliberate limits.
+    """
+
+    def __init__(self, session_id):
+        self.session_id = session_id
+        self.pending = None
+        self.active = None
+        self.context = None
+        self.selected = None
+        self.ambiguous = False
+
+    def invalidate(self):
+        self.pending = None
+        self.selected = None
+        self.ambiguous = True
+
+    def observe(self, event):
+        payload = event.get("payload") or {}
+        if not isinstance(payload, dict):
+            self.invalidate()
+            return
+        if event.get("type") == "turn_context":
+            self.context = (payload.get("turn_id"), payload.get("model"))
+            if self.active is not None and self.context[0] != self.active:
+                self.ambiguous = True
+            if self.active is not None and self.selected and self.context[1] != self.selected[0]:
+                self.ambiguous = True
+            return
+        if event.get("type") != "event_msg":
+            return
+        kind = payload.get("type")
+        if kind == "thread_settings_applied":
+            if self.active is not None:
+                # Settings updates do not change already captured request settings.
+                # The next cumulative delta may straddle that update: never guess.
+                self.ambiguous = True
+            self.pending = None
+            settings = payload.get("thread_settings")
+            if not self.session_id or payload.get("thread_id") != self.session_id or not isinstance(settings, dict):
+                return
+            model = settings.get("model")
+            collab = settings.get("collaboration_mode") or {}
+            if not isinstance(collab, dict):
+                return
+            nested = collab.get("settings", {})
+            if not isinstance(model, str) or not model or settings.get("model_provider_id") != "openai":
+                return
+            if not isinstance(nested, dict) or nested.get("model", model) != model:
+                return
+            tier = settings.get("service_tier")
+            # Only explicit, evidenced request choices; absent/null are not default.
+            mode = "fast" if tier == "priority" else "normal" if tier == "default" else "unknown"
+            self.pending = (model, mode)
+        elif kind in ("task_started", "turn_started"):
+            overlap = self.active is not None
+            turn_id = payload.get("turn_id")
+            self.active = turn_id if isinstance(turn_id, str) and turn_id else None
+            self.selected = self.pending
+            self.ambiguous = overlap
+            if self.context and self.context[0] != self.active:
+                self.context = None
+        elif kind in ("task_complete", "turn_complete", "turn_aborted"):
+            if not self.active or payload.get("turn_id") != self.active:
+                self.invalidate()
+                return
+            self.active = None
+            self.selected = None
+            self.context = None
+            self.ambiguous = False
+
+    def attribution(self):
+        if (not self.active or self.ambiguous or not self.selected
+                or self.context != (self.active, self.selected[0])):
+            return None, "unknown"
+        model, mode = self.selected
+        # Use the existing unknown-model representation for uncertain non-Astra
+        # usage too; those catalogs historically price mode=unknown as standard.
+        if mode == "unknown":
+            return (model if model == "gpt-6-astra" else None), mode
+        return model, mode
+
+
 def snapshot_db(src: Path) -> Path:
     """Copy the Codex state DB to a temp file using sqlite3's backup API.
 
@@ -168,6 +286,7 @@ def parse_rollout_facts(
     if not rollout_path.exists():
         return facts, malformed, negative_deltas
 
+    strict = _AstraTurnPricing(session_id) if _contains_astra(rollout_path, model_raw) else None
     model_key = normalize_model_key(model_raw)
     collaboration_mode: Optional[str] = None
     last_input_total = 0
@@ -184,7 +303,15 @@ def parse_rollout_facts(
                 event = json.loads(line)
             except json.JSONDecodeError:
                 malformed += 1
+                if strict is not None:
+                    strict.invalidate()
                 continue
+            if strict is not None and (not isinstance(event, dict) or not isinstance(event.get("payload", {}), dict)):
+                malformed += 1
+                strict.invalidate()
+                continue
+            if strict is not None:
+                strict.observe(event)
             if event.get("type") != "event_msg":
                 continue
             payload = event.get("payload") or {}
@@ -220,7 +347,11 @@ def parse_rollout_facts(
                 diff_cached = cached_total - last_cached_total
                 diff_output = output_total - last_output_total
 
+            fact_model = model_raw
             mode = _detect_mode(model_raw, collaboration_mode)
+            if strict is not None:
+                fact_model, mode = strict.attribution()
+                model_key = normalize_model_key(fact_model)
             quality = "first_event_delta" if is_first_delta else "ok"
 
             if diff_input < 0 or diff_cached < 0:
@@ -233,7 +364,7 @@ def parse_rollout_facts(
                             occurred_at_utc=occurred_at,
                             agent="codex",
                             session_id=session_id,
-                            model_raw=model_raw,
+                            model_raw=fact_model,
                             model_key=model_key,
                             token_kind="input_nocache",
                             tokens=nocache,
@@ -247,7 +378,7 @@ def parse_rollout_facts(
                             occurred_at_utc=occurred_at,
                             agent="codex",
                             session_id=session_id,
-                            model_raw=model_raw,
+                            model_raw=fact_model,
                             model_key=model_key,
                             token_kind="cache_read",
                             tokens=diff_cached,
@@ -264,7 +395,7 @@ def parse_rollout_facts(
                         occurred_at_utc=occurred_at,
                         agent="codex",
                         session_id=session_id,
-                        model_raw=model_raw,
+                        model_raw=fact_model,
                         model_key=model_key,
                         token_kind="output",
                         tokens=diff_output,
