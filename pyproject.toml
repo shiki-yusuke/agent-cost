@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "coding-agent-cost"
-version = "0.1.0"
+version = "0.1.1"
 description = "Estimate AI coding agent (Claude Code / Codex CLI) token usage and cost from local logs"
 readme = "README.md"
 license = { text = "MIT" }
