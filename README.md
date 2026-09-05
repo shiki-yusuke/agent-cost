@@ -154,6 +154,15 @@ network, never calls `gh`, and never resolves branches or PRs.
 
 ## Updating the rate catalog
 
+**GPT-6 Astra:** Codex Standard/Fast estimates use exact ID `gpt-6-astra` and
+owned settings matched to turn/model context in the public Codex 0.153.4 JSONL
+format. Explicit `default` uses Standard; `priority` uses 2.5x. Missing/ambiguous
+tier or model attribution stays `unpriced`, with tokens preserved. These are
+request-setting estimates, not confirmed processing tiers or actual bills.
+The catalog observation cutoff is not an official launch time; earlier usage
+is `unpriced`. See [evidence, synthetic tests and model-switch limits](docs/astra-pricing.md).
+API pricing and legacy message billing are outside this entry.
+
 Prices live in `agent_cost/rates.json`, not in code. It's a historical
 catalog: each model can have several time-bounded rate periods, so a price
 change is recorded as a new period rather than overwriting the old one (see

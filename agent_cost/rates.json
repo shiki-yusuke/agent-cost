@@ -1,13 +1,14 @@
 {
   "schema_version": "1",
-  "catalog_version": "2026-07-29",
+  "catalog_version": "2026-09-06",
   "currency": "USD",
   "unit": "per_mtok",
   "usd_per_credit": "0.04",
   "notes": [
     "All Claude rates are standard (non-batch, non-priority) API prices. Batch API is roughly 50% off, but agent-cost's logs have no signal for whether a given request went through Batch, so batch usage is priced at standard rates and will overstate cost for anyone using Batch.",
     "claude-opus-5's launch date could not be confirmed from an authoritative source as of this catalog_version; its rate period's effective_from (2026-07-01) is a placeholder -- update it once confirmed.",
-    "gpt-5.6 (sol/terra/luna) credits could not be confirmed from the primary source (help.openai.com's Codex rate card returned HTTP 403 to automated fetches). The values here were cross-checked across several independent secondary sources that agreed with each other and are internally consistent (Sol's $5/$30 per-MTok API price x 25 = 125/750 credits, matching usd_per_credit=0.04); see the gpt-5.6-* sources entries below. Treat effective_from (2026-07-01) as a placeholder and re-verify against the primary rate card when it becomes reachable."
+    "gpt-5.6 (sol/terra/luna) credits could not be confirmed from the primary source (help.openai.com's Codex rate card returned HTTP 403 to automated fetches). The values here were cross-checked across several independent secondary sources that agreed with each other and are internally consistent (Sol's $5/$30 per-MTok API price x 25 = 125/750 credits, matching usd_per_credit=0.04); see the gpt-5.6-* sources entries below. Treat effective_from (2026-07-01) as a placeholder and re-verify against the primary rate card when it becomes reachable.",
+    "gpt-6-astra: Codex standard token-based rates only; not API pricing, legacy message metering, or actual contractual charges. Confirmed 2026-09-06 JST (2026-09-05T17:18:23Z). effective_from is this observation cutoff, NOT an official launch or price-start time; earlier events remain unpriced. No Codex long-context surcharge or cache-write charge is applied. Fast multiplier 2.5 applies to explicit priority request settings with matching owned turn/model context; explicit default uses Standard. Missing or ambiguous Astra modes remain unpriced. These settings do not confirm the backend processing tier. See docs/astra-pricing.md for compatibility limits and the separate GPT-5.6 discrepancy report."
   ],
   "sources": [
     {
@@ -32,6 +33,21 @@
       "url": "https://rohitai.com/blog/openai-gpt-5-6-codex-rate-card-agentic-credit-pool",
       "retrieved_at": "2026-07-29",
       "note": "secondary source, used only for gpt-5.6 (sol/terra/luna) credits pending primary confirmation"
+    },
+    {
+      "url": "https://help.openai.com/en/articles/11481834-chatgpt-rate-card",
+      "retrieved_at": "2026-09-05T17:18:23Z",
+      "note": "Primary source: ChatGPT Work / Codex token credits and Astra Fast 2.5x. Existing GPT-5.6 values are preserved pending historical-period review; see docs/astra-pricing.md."
+    },
+    {
+      "url": "https://help.openai.com/en/articles/20001415-chatgpt-rate-card-enterprise-token-based-pricing",
+      "retrieved_at": "2026-09-05T17:18:23Z",
+      "note": "Primary source: Work / Codex standard USD token rates, Astra Fast 2.5x, no Codex Astra long-context surcharge and no Codex cache-write charge. Individual agreements may differ."
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      "retrieved_at": "2026-09-05T17:18:23Z",
+      "note": "Boundary check only: API cache writes, long context and API Fast rates are NOT applied to this Codex entry."
     }
   ],
   "models": [
@@ -483,6 +499,30 @@
           "cache_write_5m": null,
           "cache_write_1h": null,
           "output": "10.0"
+        }
+      ]
+    },
+    {
+      "model_key": "gpt-6-astra",
+      "aliases": [],
+      "fast_multiplier": "2.5",
+      "credits_per_mtok": {
+        "input_nocache": "250.0",
+        "cache_read": "25.0",
+        "cache_write_5m": null,
+        "cache_write_1h": null,
+        "output": "1250.0"
+      },
+      "rates": [
+        {
+          "rate_id": "gpt-6-astra-codex-observed-2026-09-05",
+          "effective_from": "2026-09-05T17:18:23+00:00",
+          "effective_until": null,
+          "input_nocache": "10.0",
+          "cache_read": "1.0",
+          "cache_write_5m": null,
+          "cache_write_1h": null,
+          "output": "50.0"
         }
       ]
     }

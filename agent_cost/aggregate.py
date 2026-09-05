@@ -33,6 +33,14 @@ def price_fact(catalog: RateCatalog, fact: Fact) -> Tuple[Optional[Decimal], str
     if resolved_key is None or period is None:
         return None, "unpriced", None
 
+    # Astra's verified rates cover only the exact Codex model ID. Generic
+    # suffix normalization must not implicitly price unverified snapshots,
+    # speed variants or usage from a different agent with this new entry.
+    if resolved_key == "gpt-6-astra" and (
+        fact.agent != "codex" or fact.model_raw != "gpt-6-astra" or fact.mode == "unknown"
+    ):
+        return None, "unpriced", None
+
     rate_field = fact.token_kind
     lower_bound = False
     if fact.token_kind == "cache_write_unknown":
