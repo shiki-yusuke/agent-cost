@@ -114,10 +114,12 @@ network, never calls `gh`, and never resolves branches or PRs.
   at the 5-minute rate as an explicit **lower bound** and flagged
   `lower_bound` rather than guessed at the (more expensive) 1-hour rate.
 - **Codex CLI**: rollout files record a *cumulative* token count after each
-  turn; agent-cost turns that into per-turn deltas. Codex does not expose a
-  separate cache-write signal at all, so cache writes are never reported for
-  Codex (not zero -- simply not observable, and left out of the row rather
-  than implied). Codex's `output` fact is `output_tokens` alone: cross-checking
+  turn; agent-cost turns that into per-turn deltas. Under the Codex token-rate
+  tariff used here, cache writes are not added as a separate charge. The current
+  reader does not emit independent cache-write facts; newer logs can include
+  `cache_write_input_tokens`, but this field is not used to add a cache-write
+  charge. This differs from older logs where that signal was unavailable.
+  Codex's `output` fact is `output_tokens` alone: cross-checking
   real rollout files confirms `total_tokens == input_tokens + output_tokens`
   in every sample, which means `reasoning_output_tokens` is a breakdown of
   output tokens already counted, not an additional charge -- adding it in
@@ -272,8 +274,10 @@ MIT. See [LICENSE](LICENSE).
 
 - 集計の最小単位は「1 イベント = 1 モデル × 1 token 種別」の fact であり、session 単位でモデルを
   丸めません。Claude の prompt cache は TTL 内訳（5分/1時間）が取れればそれを使い、取れない場合は
-  5分単価で **下限推計**（`lower_bound`）として明示します。Codex の cache write は観測不能なため
-  出力しません（0 とは区別）。
+  5分単価で **下限推計**（`lower_bound`）として明示します。対象の Codex トークン料金体系では
+  cache write を別料金として加算せず、現行 reader は独立した cache-write fact を出力しません。
+  新しいログに `cache_write_input_tokens` が含まれていても追加料金の計算には使用しません。
+  これは、旧ログでその情報を観測できないこととは区別します。
 - 出力フィールドは `estimated_cost_usd`（推計であることを明示）。Codex は `credits` も併記します。
   未知のモデル・単価表にない token 種別は `unpriced` として扱い、憶測の価格を出しません。
 - 単価表 (`agent_cost/rates.json`) は履歴型カタログで、値上げは新しい期間として追加します。
