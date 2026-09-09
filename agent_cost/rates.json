@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "catalog_version": "2026-09-06",
+  "catalog_version": "2026-09-09",
   "currency": "USD",
   "unit": "per_mtok",
   "usd_per_credit": "0.04",
@@ -8,7 +8,9 @@
     "All Claude rates are standard (non-batch, non-priority) API prices. Batch API is roughly 50% off, but agent-cost's logs have no signal for whether a given request went through Batch, so batch usage is priced at standard rates and will overstate cost for anyone using Batch.",
     "claude-opus-5's launch date could not be confirmed from an authoritative source as of this catalog_version; its rate period's effective_from (2026-07-01) is a placeholder -- update it once confirmed.",
     "gpt-5.6 (sol/terra/luna) credits could not be confirmed from the primary source (help.openai.com's Codex rate card returned HTTP 403 to automated fetches). The values here were cross-checked across several independent secondary sources that agreed with each other and are internally consistent (Sol's $5/$30 per-MTok API price x 25 = 125/750 credits, matching usd_per_credit=0.04); see the gpt-5.6-* sources entries below. Treat effective_from (2026-07-01) as a placeholder and re-verify against the primary rate card when it becomes reachable.",
-    "gpt-6-astra: Codex standard token-based rates only; not API pricing, legacy message metering, or actual contractual charges. Confirmed 2026-09-06 JST (2026-09-05T17:18:23Z). effective_from is this observation cutoff, NOT an official launch or price-start time; earlier events remain unpriced. No Codex long-context surcharge or cache-write charge is applied. Fast multiplier 2.5 applies to explicit priority request settings with matching owned turn/model context; explicit default uses Standard. Missing or ambiguous Astra modes remain unpriced. These settings do not confirm the backend processing tier. See docs/astra-pricing.md for compatibility limits and the separate GPT-5.6 discrepancy report."
+    "gpt-6-astra: Codex standard token-based rates only; not API pricing, legacy message metering, or actual contractual charges. Confirmed 2026-09-06 JST (2026-09-05T17:18:23Z). effective_from is this observation cutoff, NOT an official launch or price-start time; earlier events remain unpriced. No Codex long-context surcharge or cache-write charge is applied. Fast multiplier 2.5 applies to explicit priority request settings with matching owned turn/model context; explicit default uses Standard. Missing or ambiguous Astra modes remain unpriced. These settings do not confirm the backend processing tier. See docs/astra-pricing.md for compatibility limits and the separate GPT-5.6 discrepancy report.",
+    "claude-fable-5-1 added 2026-09-09: rate_id claude-fable-5-1-local-first-observed-2026-08-30. effective_from is the date the raw model ID was first observed in a local transcript, not a confirmed official launch date -- if an authoritative launch date is confirmed later, add it as a separate rate_id with effective_until on this one rather than editing this period in place. Values (cache_read $0.25/MTok = 0.025x base input) differ from claude-fable-5's cache_read ($1.00/MTok = 0.1x); this is a genuine per-model price difference confirmed against the primary source (see sources below), not an inconsistency to reconcile.",
+    "claude-sonnet-5 corrected 2026-09-09: a prior period (rate_id claude-sonnet-5-standard, effective_from 2026-09-01, values 3.0/0.30/3.75/6.0/15.0) priced a previously-announced rate increase that the pricing page's claude-sonnet-5-introductory-pricing note states did not occur (\"The previously scheduled increase to $3/$15 ... on September 1, 2026 will not occur\"). That period has been removed and claude-sonnet-5-launch-promo's effective_until extended to null (renamed claude-sonnet-5-launch-promo-extended-2026-09-09) since the launch price is confirmed to be the ongoing price with no change at the 2026-09-01 boundary. Any measure/v1 or report output computed against the pre-correction catalog for claude-sonnet-5 sessions occurring on or after 2026-09-01 overstated cost by 1.5x for that model; see e0-pre/rc-catalog-and-envelope.md RC-25 for the detection method."
   ],
   "sources": [
     {
@@ -48,6 +50,16 @@
       "url": "https://developers.openai.com/api/docs/models/gpt-6-astra",
       "retrieved_at": "2026-09-05T17:18:23Z",
       "note": "Boundary check only: API cache writes, long context and API Fast rates are NOT applied to this Codex entry."
+    },
+    {
+      "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "retrieved_at": "2026-09-09",
+      "note": "used for claude-fable-5-1 (cache_read 0.025x footnote) and the claude-sonnet-5-introductory-pricing correction"
+    },
+    {
+      "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+      "retrieved_at": "2026-09-09",
+      "note": "cache write TTL multipliers (5m = 1.25x, 1h = 2x), cross-checked against the pricing page cache columns"
     }
   ],
   "models": [
@@ -62,6 +74,23 @@
           "effective_until": null,
           "input_nocache": "10.0",
           "cache_read": "1.00",
+          "cache_write_5m": "12.50",
+          "cache_write_1h": "20.0",
+          "output": "50.0"
+        }
+      ]
+    },
+    {
+      "model_key": "claude-fable-5-1",
+      "aliases": [],
+      "fast_multiplier": "1.0",
+      "rates": [
+        {
+          "rate_id": "claude-fable-5-1-local-first-observed-2026-08-30",
+          "effective_from": "2026-08-30T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "10.0",
+          "cache_read": "0.25",
           "cache_write_5m": "12.50",
           "cache_write_1h": "20.0",
           "output": "50.0"
@@ -176,24 +205,14 @@
       "fast_multiplier": "1.0",
       "rates": [
         {
-          "rate_id": "claude-sonnet-5-launch-promo",
+          "rate_id": "claude-sonnet-5-launch-promo-extended-2026-09-09",
           "effective_from": "2026-06-30T00:00:00+00:00",
-          "effective_until": "2026-09-01T00:00:00+00:00",
+          "effective_until": null,
           "input_nocache": "2.0",
           "cache_read": "0.20",
           "cache_write_5m": "2.50",
           "cache_write_1h": "4.0",
           "output": "10.0"
-        },
-        {
-          "rate_id": "claude-sonnet-5-standard",
-          "effective_from": "2026-09-01T00:00:00+00:00",
-          "effective_until": null,
-          "input_nocache": "3.0",
-          "cache_read": "0.30",
-          "cache_write_5m": "3.75",
-          "cache_write_1h": "6.0",
-          "output": "15.0"
         }
       ]
     },
