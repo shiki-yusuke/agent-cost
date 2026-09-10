@@ -186,7 +186,9 @@ network, never calls `gh`, and never resolves branches or PRs.
   deduplicated first -- but only when a row carries a full
   `message.id` + `requestId` pair; a row missing either half is emitted
   on its own (never merged) and flagged `source_quality: "identity_missing"`
-  rather than assumed billing-accurate. See `CHANGELOG.md`'s 0.2.0 entry.
+  rather than assumed billing-accurate. `identity_missing` facts are still
+  priced and included in rows/totals; the flag is a warning, not an
+  exclusion or an unpriced status. See `CHANGELOG.md`'s 0.2.0 entry.
   When Anthropic's prompt-cache TTL breakdown (5-minute vs 1-hour writes) is
   present in the log, it's used; otherwise the cache-write tokens are priced
   at the 5-minute rate as an explicit **lower bound** and flagged
