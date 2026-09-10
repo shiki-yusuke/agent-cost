@@ -5,9 +5,13 @@ message that carries a ``message.usage`` block is one billing event and
 becomes its own set of facts, attributed to the model recorded on *that*
 event (``message.model``) -- never to a session-wide majority model, since
 a single session can span multiple models. "Logical" matters: Claude Code
-writes one JSONL line per content block of a message, repeating the same
-``usage`` on every line, so lines sharing the same message are deduplicated
-first -- see ``parse_session_detailed``.
+writes one JSONL line per content block of a message, and those lines
+sharing the same message are deduplicated first -- not because every line
+repeats an identical ``usage`` (it doesn't: ``output_tokens`` typically
+grows line by line as the response streams in, and intermediate lines
+usually lack ``usage.speed``), but because they're all billing for the
+same logical message and dedup picks the one row whose usage actually
+gets billed -- see ``parse_session_detailed``.
 """
 
 from __future__ import annotations
@@ -178,9 +182,26 @@ def _mode_conflict(mode_a: str, mode_b: str) -> bool:
 
 def _rows_differ(row_a: dict, row_b: dict) -> bool:
     """Whether two rows disagree on anything that would change what gets
-    billed: the 6-field input signature (model + 5 input-side token
-    amounts), mode (wildcard-aware, see ``_mode_conflict``), or output.
-    Used by ``_select_adopted_row``'s override check.
+    billed. This is the single definition of "differ" shared by both
+    ``conflicting_duplicate_groups`` classification and
+    ``_select_adopted_row``'s override check -- a row "differs" from
+    another when its ``model``, any of its 5 input-side token amounts (via
+    ``_input_signature``), or its ``output`` amount is different, or its
+    ``mode`` is a *different concrete* mode (``_mode_conflict`` -- two
+    modes that are both ``"normal"``/``"fast"`` but unequal).
+
+    ``"unknown"`` mode is deliberately **not** treated as differing from a
+    concrete mode here, for the override just as much as for conflict
+    classification: ``"unknown"`` means ``usage.speed`` was simply absent
+    on that row, not that the row actually ran at some other, different
+    speed -- it is missing information, not a competing value. Real
+    transcript data backs this up for the override specifically: the
+    completing (``stop_reason``-bearing) row is always the group's last
+    row, and an ``"unknown"``-mode row has never been observed *after* a
+    completing row -- the "override to the last row because a later row
+    differs" path is there for determinism against undocumented future
+    transcript shapes, not because a later ``"unknown"``-mode row need be
+    picked over an earlier, complete, concrete-mode row today.
     """
     if _input_signature(row_a["model_raw"], row_a["tokens"]) != _input_signature(row_b["model_raw"], row_b["tokens"]):
         return True
@@ -190,7 +211,11 @@ def _rows_differ(row_a: dict, row_b: dict) -> bool:
 
 
 def _resolve_mode(rows: list, adopted: dict) -> str:
-    """The mode to emit on a dedup group's fact(s).
+    """The mode to emit on a dedup group's fact(s) -- part of the group's
+    adoption contract, alongside ``_select_adopted_row`` and
+    ``_rows_differ``: the adopted row's fields are emitted as-is *except*
+    ``mode``, which goes through this normalization step instead of being
+    taken blindly.
 
     Normally the adopted row's own mode. But if the adopted row's mode is
     the ``"unknown"`` wildcard (its ``usage.speed`` was absent -- typical
@@ -218,13 +243,18 @@ def _select_adopted_row(rows: list) -> dict:
     "complete"). Falls back to the group's last row if none qualifies.
 
     Override: if any row *after* that primary pick differs from it (see
-    ``_rows_differ``), the group's actual last row is adopted instead. A
-    "complete" row followed by a further, differently-valued row is not
-    something Claude Code is documented to do, but if it happens the most
-    recently observed state should win over an earlier "complete" marker
-    that turned out not to be final -- this keeps the rule deterministic
+    ``_rows_differ`` for exactly what "differs" means -- model, an
+    input-side token amount, a genuinely different concrete mode, or
+    output; ``"unknown"`` mode is not itself a difference from a concrete
+    mode), the group's actual last row is adopted instead. A "complete"
+    row followed by a further, differently-valued row is not something
+    Claude Code is documented to do, but if it happens the most recently
+    observed state should win over an earlier "complete" marker that
+    turned out not to be final -- this keeps the rule deterministic
     (always resolvable to one specific row) rather than guessing which of
-    two candidates is more trustworthy.
+    two candidates is more trustworthy. The row this function returns then
+    has its ``mode`` normalized separately by ``_resolve_mode`` before
+    being emitted.
     """
     adopted_idx = None
     for idx in range(len(rows) - 1, -1, -1):
@@ -250,11 +280,16 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
 
     Claude Code's transcript writes one JSONL line per *content block* of an
     assistant message, not one line per message: every line belonging to the
-    same message carries the same ``message.id`` / ``requestId`` and the same
-    ``message.usage`` (observed behavior; not a documented, stable schema --
-    see the design review this implements). Treating every line as its own
-    billing event over-counts a single message 3-7x. Dedup is per-file only
-    (a global, cross-file dedup would risk merging facts across sessions).
+    same message carries the same ``message.id`` / ``requestId``, but not
+    necessarily an identical ``message.usage`` -- ``model`` and the 5
+    input-side token amounts stay constant across the message's lines,
+    while ``output_tokens`` typically grows line by line as the response
+    streams in and ``usage.speed`` is usually present only on the final
+    line (observed behavior; not a documented, stable schema -- see the
+    design review this implements). Treating every line as its own billing
+    event over-counts a single message 3-7x regardless. Dedup is per-file
+    only (a global, cross-file dedup would risk merging facts across
+    sessions).
 
     Dedup key: ``(message.id, requestId)`` -- **only** when *both* are
     present and are non-empty strings (see ``_valid_id``). A single
@@ -268,7 +303,25 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
     so downstream consumers can see it wasn't dedup-verified.
 
     Within a dedup group, the adopted row (whose usage becomes the emitted
-    fact) is chosen by ``_select_adopted_row`` -- see its docstring.
+    fact) is chosen by ``_select_adopted_row``: the last row with a
+    non-empty-string ``message.stop_reason``, falling back to the group's
+    last row if none qualifies, *unless* a row after that pick actually
+    differs from it (see ``_rows_differ``) -- differs meaning ``model``,
+    an input-side token amount, a genuinely different *concrete* mode, or
+    ``output``, in which case the group's actual last row is adopted
+    instead. ``"unknown"`` mode is deliberately not itself a difference
+    from a concrete mode for this override, the same as for
+    ``conflicting_duplicate_groups`` classification below: real transcript
+    data shows the completing (``stop_reason``-bearing) row is always the
+    group's last row, and an ``"unknown"``-mode row has never been
+    observed to follow it, so this never causes an override to pick the
+    wrong row in practice -- it exists for determinism against
+    undocumented future transcript shapes. The emitted fact's ``mode`` is
+    then resolved separately by ``_resolve_mode``, not read directly off
+    the adopted row: if the adopted row's own mode is ``"unknown"`` but
+    the group has exactly one concrete mode elsewhere, that concrete mode
+    is emitted instead (see its docstring).
+
     ``occurred_at_utc`` on the emitted fact is the *adopted* row's own
     timestamp (not the group's first-seen timestamp): the adopted row is
     what determines the actual token counts, and pricing/month-bucketing
@@ -282,12 +335,14 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
     A group is flagged in ``conflicting_duplicate_groups`` unless it looks
     like ordinary Claude Code streaming: real transcript data (415
     subagent sessions, 14,624 full-pair groups) shows every row in a group
-    sharing identical input-side fields (``input_tokens``,
+    sharing identical ``model`` and input-side fields (``input_tokens``,
     ``cache_read_input_tokens``, the ``cache_creation`` TTL breakdown) while
     ``output_tokens`` alone grows monotonically line-by-line as the
     response streams in, non-decreasing across the group's rows in file
     order, with the final (``stop_reason``-bearing) row carrying the
-    largest value -- 0 of those 14,624 groups disagreed on an input field.
+    largest value -- 0 of those 14,624 groups disagreed on ``model`` or an
+    input field.
+
     A separate real-data check (60 more subagent transcripts, 2026-09-10)
     found 814 groups the *input*-only rule above would still miss: every
     one of those 814 was a ``mode`` mismatch caused by ``usage.speed``

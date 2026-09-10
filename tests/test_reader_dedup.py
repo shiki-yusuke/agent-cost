@@ -17,8 +17,14 @@ Dedup contract (spec, round 2):
   - Adopted row per key = the last row whose ``message.stop_reason`` is a
     non-empty string ("" does not count as complete); if none qualifies,
     the last row of the group. However, if any row *after* that candidate
-    has a different billing signature, the adopted row becomes the group's
-    last row regardless of stop_reason.
+    "differs" from it, the adopted row becomes the group's last row
+    regardless of stop_reason. "Differs" here means any of: the 5
+    input-side token fields (input_nocache, cache_read, cache_write_5m,
+    cache_write_1h, cache_write_unknown), ``model``, two *concrete* mode
+    values, or ``output_tokens`` -- any value mismatch counts for this
+    purpose (direction doesn't matter here, unlike conflict detection
+    below). mode "unknown" vs a concrete mode value is never counted as a
+    difference for this purpose either -- see the mode wildcard bullet.
   - ``Fact.occurred_at_utc`` is the *adopted* row's timestamp (not the
     first row's). Only the *position* of a key's facts in the output
     ``facts`` list follows first-seen order.
@@ -33,16 +39,21 @@ Dedup contract (spec, round 2):
     non-decreasing row-by-row is normal streaming progression, NOT a
     conflict. A group IS a conflict iff the input-side signature differs
     across any two rows, or ``output_tokens`` decreases (is non-monotonic)
-    at any step in row order. The adopted-row rule above is unaffected by
-    this distinction -- it is still evaluated purely from stop_reason and
-    "does a later row disagree" (using this same conflict definition for
-    "disagree").
-  - Within the input-side signature, mode == "unknown" (no usage.speed
-    key -- real streaming's non-final rows) is a wildcard: mixing
-    "unknown" with exactly one concrete mode value is not, by itself, a
-    conflict. Two *concrete* mode values differing (e.g. "fast" vs
-    "normal") is still a conflict. The emitted Fact's mode is always the
-    adopted row's own value.
+    at any step in row order. Note this is a *different* comparison from
+    the adopted-row "differs" rule above: adoption cares about any output
+    value mismatch (an increase can still switch the adopted row), while
+    conflict only fires on an output *decrease*.
+  - Within the input-side signature (both for conflict detection and for
+    the adopted-row "differs" rule above), mode == "unknown" (no
+    usage.speed key -- real streaming's non-final rows) is a wildcard:
+    mixing "unknown" with exactly one concrete mode value is not, by
+    itself, a conflict or a difference. Two *concrete* mode values
+    differing (e.g. "fast" vs "normal") is still a conflict/difference.
+    The emitted Fact's mode is resolved (``_resolve_mode``): if the
+    adopted row's own mode is a concrete value, that value is used; if
+    the adopted row is "unknown" but the group contains exactly one
+    concrete mode value elsewhere, that concrete value is used instead of
+    "unknown".
   - measure's 3 counters in data_quality are summed only over the
     requested session ids within the report window, not globally across
     every fact read from disk.
@@ -255,21 +266,26 @@ def test_b1_conflicting_row_after_completion_row_wins_adoption():
 
 
 def test_b2_empty_string_stop_reason_is_not_treated_as_complete():
-    """Spec item B(ii): stop_reason == "" (empty string) must not count as
-    a completed row. With every row in the group at stop_reason="", there
-    is no adoption candidate, so the group falls back to the last row --
-    same rule as the all-null case. The two rows also differ on the input
-    side (input=10 vs 20, deliberately, so this stays a conflict under
-    the final contract regardless of output direction) -- a broken
-    implementation treating "" as a valid non-empty stop_reason would
-    still land on the last row here (it's also the group's last
-    completion) by coincidence, so the binding check is conflict
-    detection: a false "no conflict" would mean the two rows' differing
-    usage was never compared at all."""
+    """Spec item B(ii) (final, terra review): stop_reason == "" (empty
+    string) must not count as a completed row. Row 1 is a genuine
+    completion (end_turn, occurred_at 00:00:00); row 2 has
+    stop_reason="" and is otherwise identical to row 1 (same
+    input_tokens, same output_tokens) -- there is no "difference" (per
+    the adopted-row rule) between the two rows either way. This makes the
+    two interpretations diverge: a correct implementation never lets ""
+    become a candidate, so row 1 (the only real candidate) is adopted and
+    row 2 -- being identical to it -- has no reason to override it,
+    giving occurred_at 00:00:00. A broken implementation that treats ""
+    as a valid non-empty stop_reason would instead make row 2 the last
+    (and therefore adopted) candidate, giving occurred_at 00:00:05.
+    (An earlier version of this fixture had *both* rows at
+    stop_reason="" with differing usage -- terra review flagged that as
+    non-discriminating, since both interpretations there fall back to
+    "last row" and land on the same answer either way. This fixture
+    replaces it.)"""
     result = parse_session_detailed(_fixture("stop_reason_empty_string_not_complete.jsonl"))
-    output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
-    assert output_tokens == [20]
-    assert result.conflicting_duplicate_groups == 1
+    assert all(f.occurred_at_utc.isoformat().startswith("2026-06-01T00:00:00") for f in result.facts)
+    assert result.conflicting_duplicate_groups == 0
 
 
 def test_b3_multiple_completion_rows_with_differing_signature_last_completion_wins():
@@ -395,6 +411,77 @@ def test_mode_concrete_values_differing_is_a_conflict():
     result = parse_session_detailed(_fixture("mode_concrete_values_differ_conflict.jsonl"))
     assert result.conflicting_duplicate_groups == 1
     assert all(f.mode == "normal" for f in result.facts)
+
+
+# ---------------------------------------------------------------------------
+# Adopted-row "differs" interacts with the mode wildcard and _resolve_mode
+# (terra review, negative-side coverage)
+# ---------------------------------------------------------------------------
+
+
+def test_completion_followed_by_unknown_mode_row_with_no_other_diff_keeps_candidate():
+    """Spec (terra review, negative test 1): row 1 is a genuine completion
+    (end_turn, mode "normal" via speed="standard", output=50); row 2 has
+    stop_reason=null, no usage.speed (mode "unknown"), and the *same*
+    output (50) and input tokens. Per the adopted-row "differs" rule,
+    mode "unknown" vs a concrete value is never counted as a difference,
+    and nothing else differs either (input tokens and output are
+    identical) -- so row 2 does NOT override the candidate. The adopted
+    row stays row 1: occurred_at must be 00:00:00 (not row 2's
+    00:00:05), conflict must be 0, and the emitted mode must be "normal".
+    A broken implementation treating the mode mismatch (normal vs
+    unknown) as a difference, or ignoring the wildcard rule, would flip
+    adoption to row 2 (occurred_at 00:00:05)."""
+    result = parse_session_detailed(_fixture("completion_then_unknown_no_diff_keeps_candidate.jsonl"))
+    assert all(f.occurred_at_utc.isoformat().startswith("2026-06-01T00:00:00") for f in result.facts)
+    assert result.conflicting_duplicate_groups == 0
+    assert all(f.mode == "normal" for f in result.facts)
+
+
+def test_output_difference_after_completion_switches_adoption_and_resolves_mode():
+    """Spec (terra review, negative test 2 -- _resolve_mode trigger): row 1
+    is a completion (end_turn, mode "normal", output=10); row 2 has
+    stop_reason=null, no usage.speed (mode "unknown"), and a *different*
+    output (60). Unlike the previous test, output_tokens genuinely
+    differs here, so the adopted-row "differs" rule DOES fire (output is
+    one of the compared fields) and adoption switches to row 2:
+    occurred_at must be 00:00:05, output must be 60. Since the adopted
+    row (row 2) is itself "unknown" but the group contains exactly one
+    concrete mode value elsewhere (row 1's "normal"), the emitted Fact's
+    mode must be resolved to "normal", not left as "unknown"
+    (_resolve_mode). Because the difference here is only in output_tokens
+    and it's an *increase* (10 -> 60), the input-side signature is
+    unchanged and output is non-decreasing, so this is NOT a conflict
+    (conflicting_duplicate_groups == 0) -- the adoption switch and
+    conflict detection are governed by different rules (see module
+    docstring). A broken implementation would either keep row 1 adopted
+    (missing the output difference), or emit mode "unknown" instead of
+    resolving it from the group."""
+    result = parse_session_detailed(_fixture("resolve_mode_from_group_when_adopted_is_unknown.jsonl"))
+    output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
+    assert output_tokens == [60]
+    assert all(f.occurred_at_utc.isoformat().startswith("2026-06-01T00:00:05") for f in result.facts)
+    assert all(f.mode == "normal" for f in result.facts)
+    assert result.conflicting_duplicate_groups == 0
+
+
+def test_output_increase_after_completion_switches_adoption_same_concrete_mode():
+    """Spec (terra review, negative test 3): same shape as the
+    _resolve_mode test above, but both rows carry the *same* concrete
+    mode ("normal" via speed="standard" on both) -- mode plays no role in
+    this one. Row 1 completes with output=10 (00:00:00); row 2 has
+    stop_reason=null and a different output (60, 00:00:05). The
+    output_tokens difference alone (mode is identical, not a factor)
+    must switch adoption to row 2: occurred_at must be 00:00:05. This
+    isolates that the "differs" rule reacts to output_tokens changes even
+    without any mode wildcard interaction. A broken implementation
+    ignoring output differences when deciding whether a later row
+    overrides the candidate would keep occurred_at at 00:00:00."""
+    result = parse_session_detailed(_fixture("output_increase_after_completion_switches_adoption.jsonl"))
+    assert all(f.occurred_at_utc.isoformat().startswith("2026-06-01T00:00:05") for f in result.facts)
+    output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
+    assert output_tokens == [60]
+    assert result.conflicting_duplicate_groups == 0
 
 
 def test_c_output_increase_with_identical_input_side_is_not_a_conflict(tmp_path):
