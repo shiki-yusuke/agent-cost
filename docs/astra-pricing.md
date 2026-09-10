@@ -21,7 +21,8 @@ Official page bodies were checked on **2026-09-06 JST**, recorded at
   checked to distinguish products. Its long-context multipliers, cache-write
   tariff and 2x API Fast rate are **not** used in the Codex entry.
 
-`catalog_version` is `2026-09-06` (the local confirmation date). The catalog
+The Astra rates were introduced in `catalog_version` `2026-09-06` (the local
+confirmation date); later catalog versions carry them forward unchanged. The catalog
 requires an `effective_from`; the Astra period starts at the recorded observation
 cutoff `2026-09-05T17:18:23Z`, inclusive. **This is a conservative catalog policy,
 not an official launch time or tariff commencement time.** Earlier events remain

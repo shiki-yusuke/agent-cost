@@ -35,16 +35,25 @@ def test_gpt_5_5_cache_write_is_unpriced():
     assert period.values["cache_write_5m"] is None
 
 
-def test_sonnet_5_historical_switch_before_and_after_cutover():
+def test_sonnet_5_price_is_unchanged_across_the_2026_09_01_boundary():
+    # The $3/$15 increase originally scheduled for 2026-09-01 was announced but
+    # never took effect (platform.claude.com/docs/en/about-claude/pricing, note
+    # claude-sonnet-5-introductory-pricing, retrieved 2026-09-09): "The $2/$10 ...
+    # is now the standard price. The previously scheduled increase to $3/$15 ...
+    # will not occur." claude-sonnet-5-launch-promo (through 2026-09-01) is
+    # followed by claude-sonnet-5-standard-2026-09-01 (from 2026-09-01, open
+    # ended), a distinct rate_id but with the identical $2/$10 table, so the
+    # price stays continuous across the boundary even though the period
+    # identity changes there.
     catalog = load_rates()
     _, promo = catalog.rate_for("claude-sonnet-5", dt("2026-08-31T23:00:00+00:00"))
     assert promo.values["input_nocache"] == Decimal("2.0")
 
-    _, standard = catalog.rate_for("claude-sonnet-5", dt("2026-09-01T00:00:00+00:00"))
-    assert standard.values["input_nocache"] == Decimal("3.0")
+    _, at_boundary = catalog.rate_for("claude-sonnet-5", dt("2026-09-01T00:00:00+00:00"))
+    assert at_boundary.values == promo.values
 
-    _, still_standard = catalog.rate_for("claude-sonnet-5", dt("2026-12-01T00:00:00+00:00"))
-    assert still_standard.values["input_nocache"] == Decimal("3.0")
+    _, later = catalog.rate_for("claude-sonnet-5", dt("2026-12-01T00:00:00+00:00"))
+    assert later.values["input_nocache"] == Decimal("2.0")
 
 
 def test_claude_fable_5_before_launch_date_is_unpriced():
