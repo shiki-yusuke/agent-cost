@@ -43,8 +43,8 @@ import pytest
 
 import agent_cost
 from agent_cost import cli
-from agent_cost.aggregate import filter_facts
-from agent_cost.readers.claude import parse_session_detailed, parse_session_facts, read_claude_facts
+from agent_cost.aggregate import filter_facts, scope_dedup_units
+from agent_cost.readers.claude import ClaudeDedupUnit, parse_session_detailed, parse_session_facts, read_claude_facts
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "dedup"
 
@@ -401,6 +401,48 @@ def test_d_adopted_timestamp_crossing_month_boundary_drives_window_filtering():
     until_may = datetime(2026, 5, 31, tzinfo=timezone.utc)
     assert list(filter_facts(result.facts, since_utc=since_june)) != []
     assert list(filter_facts(result.facts, until_utc=until_may)) == []
+
+
+# ---------------------------------------------------------------------------
+# scope_dedup_units window semantics (final review, non-blocker follow-up)
+# ---------------------------------------------------------------------------
+
+
+def test_scope_dedup_units_half_open_window_includes_since_excludes_until():
+    """Spec: scope_dedup_units re-scopes the 3 dedup counters to the
+    half-open window [since_utc, until_utc), the same semantics
+    filter_facts uses for Fact.occurred_at_utc. A unit whose
+    occurred_at_utc equals `since` exactly must be included; a unit whose
+    occurred_at_utc equals `until` exactly must be excluded. A broken
+    implementation using an inclusive `until` bound (occurred_at <=
+    until) would count the until-boundary unit too, inflating all 3
+    returned counters."""
+    since = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    until = datetime(2026, 6, 2, tzinfo=timezone.utc)
+
+    unit_at_since = ClaudeDedupUnit(
+        session_id="s1",
+        occurred_at_utc=since,
+        duplicate_rows_skipped=2,
+        conflicting=True,
+        missing_identity=False,
+    )
+    unit_at_until = ClaudeDedupUnit(
+        session_id="s1",
+        occurred_at_utc=until,
+        duplicate_rows_skipped=5,
+        conflicting=False,
+        missing_identity=True,
+    )
+
+    duplicate_rows_skipped, conflicting_duplicate_groups, missing_dedup_identity_rows = scope_dedup_units(
+        [unit_at_since, unit_at_until],
+        since_utc=since,
+        until_utc=until,
+    )
+    assert duplicate_rows_skipped == 2
+    assert conflicting_duplicate_groups == 1
+    assert missing_dedup_identity_rows == 0
 
 
 # ---------------------------------------------------------------------------
