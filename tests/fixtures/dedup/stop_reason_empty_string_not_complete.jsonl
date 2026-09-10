@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-06-01T00:00:00Z","sessionId":"s-b2","requestId":"req-b2","message":{"id":"msg-b2","model":"claude-opus-4-8","stop_reason":"","usage":{"input_tokens":10,"output_tokens":10}}}
+{"type":"assistant","timestamp":"2026-06-01T00:00:05Z","sessionId":"s-b2","requestId":"req-b2","message":{"id":"msg-b2","model":"claude-opus-4-8","stop_reason":"","usage":{"input_tokens":10,"output_tokens":20}}}

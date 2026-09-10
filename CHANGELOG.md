@@ -14,9 +14,23 @@ facts from 0.1.x and 0.2.0+ are not directly comparable. See "Fixed" below.
   line as its own billing event, so a single message could be counted
   3-7x. `parse_session_facts` (and the new `parse_session_detailed`) now
   deduplicate rows that share the same logical message within one session
-  file, per Claude Code's own guidance to dedup on `message.id` /
-  `requestId`. This is a bug fix, not a behavior change anyone should have
-  relied on: 0.1.x's Claude token totals were inflated.
+  file. This is a bug fix, not a behavior change anyone should have relied
+  on: 0.1.x's Claude token totals were inflated.
+
+  Dedup only applies when a row carries **both** a `message.id` and a
+  `requestId` (both non-empty strings) -- that full pair is the dedup key.
+  A single identifier alone is not enough to dedup on, since two genuinely
+  different messages could coincidentally share just one half of the pair;
+  a row missing either half is emitted individually (never merged with
+  another row) and flagged both in `data_quality.missing_dedup_identity_rows`
+  and, on the fact itself, via a new `source_quality` value,
+  `"identity_missing"` (see `agent_cost/facts.py`'s `SOURCE_QUALITY_VALUES`).
+  Within a dedup group, the emitted fact's `occurred_at_utc` is the
+  *adopted* row's own timestamp (the row whose usage is actually billed),
+  not the group's first-seen timestamp -- using an earlier placeholder
+  row's timestamp could shift real tokens across a month or rate-period
+  boundary they don't belong to. Only the group's *position* in the
+  output stays first-seen-ordered.
 
 ### Added
 
@@ -24,8 +38,14 @@ facts from 0.1.x and 0.2.0+ are not directly comparable. See "Fixed" below.
   and `data_quality.missing_dedup_identity_rows` in `report` and `measure`
   JSON output -- diagnostics for the dedup above (how many duplicate lines
   were collapsed, how many dedup groups disagreed on token counts across
-  their duplicate lines, and how many rows had neither `message.id` nor
-  `requestId` to dedup on at all).
+  their duplicate lines, and how many rows had neither a full `message.id`
+  + `requestId` pair to dedup on at all). All three are scoped to match
+  the rest of that command's output: `report`'s to its `--since`/`--until`
+  window, `measure`'s to its requested `--session-id`s *and* window -- an
+  unrequested session's conflict never affects a requested session's
+  counters.
+- A new `source_quality` value, `"identity_missing"` (see "Fixed" above),
+  alongside the existing `"ok"` and `"first_event_delta"`.
 - `measure`'s JSON output now also carries `producer_version` (the
   installed `agent-cost` version) and `accounting_basis` (currently
   `"agent-cost-raw-total/v2"`) at the top level, alongside

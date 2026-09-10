@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-05-31T23:59:59Z","sessionId":"s-month","requestId":"req-month","message":{"id":"msg-month","model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":5,"output_tokens":1}}}
+{"type":"assistant","timestamp":"2026-06-01T00:00:01Z","sessionId":"s-month","requestId":"req-month","message":{"id":"msg-month","model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":20}}}

@@ -178,13 +178,15 @@ scraping `report`.
 agent-cost only reads data that is already on disk. It never talks to the
 network, never calls `gh`, and never resolves branches or PRs.
 
-- **Claude Code**: every logical assistant message (deduplicated by
-  `message.id` × `requestId`, since Claude Code's transcript writes one
-  JSONL line per content block of the same message with the same `usage`
-  block repeated on every line -- see `CHANGELOG.md`'s 0.2.0 entry) is one
-  billing event, attributed to the exact model on that event (a session
-  that switches models mid-conversation is not folded into one "primary
-  model").
+- **Claude Code**: every logical assistant message is one billing event,
+  attributed to the exact model on that event (a session that switches
+  models mid-conversation is not folded into one "primary model"). Claude
+  Code's transcript writes one JSONL line per content block of the same
+  message, repeating the same `usage` block on every line, so lines are
+  deduplicated first -- but only when a row carries a full
+  `message.id` + `requestId` pair; a row missing either half is emitted
+  on its own (never merged) and flagged `source_quality: "identity_missing"`
+  rather than assumed billing-accurate. See `CHANGELOG.md`'s 0.2.0 entry.
   When Anthropic's prompt-cache TTL breakdown (5-minute vs 1-hour writes) is
   present in the log, it's used; otherwise the cache-write tokens are priced
   at the 5-minute rate as an explicit **lower bound** and flagged

@@ -2,31 +2,48 @@
 
 Expected values are derived from the spec contract given to the tester role
 (not from the implementation), summarized inline per test. Fixtures live in
-``tests/fixtures/dedup/*.jsonl``.
+``tests/fixtures/dedup/*.jsonl``. This file reflects the architect's 2nd
+review round of the contract (see module docstring bullets below); a few
+cases from the 1st round were reversed accordingly.
 
-Dedup contract (spec):
-  - key = (message.id, requestId) when both present; message.id alone when
-    requestId is absent; requestId alone when message.id is absent; rows
-    with neither are emitted individually (not deduped) and counted in
-    ``missing_dedup_identity_rows``.
-  - Adopted row per key = the last row whose ``message.stop_reason`` is not
-    null/missing; if none qualifies, the last row of the group.
-  - ``occurred_at`` and a key's position in ``facts`` order come from the
-    *first* row of the group (first-seen ordering), even though the usage
-    values come from the adopted row.
-  - ``duplicate_rows_skipped`` = sum over keys of (row_count - 1).
+Dedup contract (spec, round 2):
+  - key = (message.id, requestId), and dedup only happens when *both* are
+    present as non-empty strings ("full pair"). A row where either side is
+    missing, not a string (list/dict/number), or an empty string is never
+    deduped against anything -- it is emitted individually, counted in
+    ``missing_dedup_identity_rows``, and its Fact's ``source_quality`` is
+    ``"identity_missing"``. Single-ID fallback (message.id-only or
+    requestId-only) from round 1 is abolished.
+  - Adopted row per key = the last row whose ``message.stop_reason`` is a
+    non-empty string ("" does not count as complete); if none qualifies,
+    the last row of the group. However, if any row *after* that candidate
+    has a different billing signature, the adopted row becomes the group's
+    last row regardless of stop_reason.
+  - ``Fact.occurred_at_utc`` is the *adopted* row's timestamp (not the
+    first row's). Only the *position* of a key's facts in the output
+    ``facts`` list follows first-seen order.
+  - ``duplicate_rows_skipped`` = sum over dedup-eligible keys of
+    (row_count - 1). Rows counted in missing_dedup_identity_rows are not
+    part of this sum.
   - billing signature = (model, mode, input_nocache, cache_read,
     cache_write_5m, cache_write_1h, cache_write_unknown, output). Two or
     more distinct signatures within one key's group increments
     ``conflicting_duplicate_groups`` by 1 (the adopted row is still
     emitted, never dropped).
+  - measure's 3 counters in data_quality are summed only over the
+    requested session ids within the report window, not globally across
+    every fact read from disk.
 """
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+
+import pytest
 
 import agent_cost
 from agent_cost import cli
+from agent_cost.aggregate import filter_facts
 from agent_cost.readers.claude import parse_session_detailed, parse_session_facts, read_claude_facts
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "dedup"
@@ -34,6 +51,41 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures" / "dedup"
 
 def _fixture(name: str) -> Path:
     return FIXTURES_DIR / name
+
+
+def _write_jsonl(path: Path, events: list) -> None:
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+
+
+def _sig_usage(**overrides) -> dict:
+    """Baseline usage exercising every billing-signature dimension at once
+    (input_nocache, cache_read, cache_write_5m, cache_write_1h, a
+    cache_write_unknown leftover, and output), so a single-field override
+    changes exactly one dimension."""
+    base = {
+        "input_tokens": 100,
+        "cache_read_input_tokens": 50,
+        "cache_creation_input_tokens": 60,
+        "cache_creation": {"ephemeral_5m_input_tokens": 30, "ephemeral_1h_input_tokens": 20},
+        "output_tokens": 40,
+    }
+    base.update(overrides)
+    return base
+
+
+def _sig_event(ts: str, usage: dict, *, model: str = "claude-opus-4-8", stop_reason="end_turn") -> dict:
+    return {
+        "type": "assistant",
+        "timestamp": ts,
+        "sessionId": "s-sig",
+        "requestId": "req-sig",
+        "message": {"id": "msg-sig", "model": model, "stop_reason": stop_reason, "usage": usage},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Basic dedup / conflict / adopted-row behavior
+# ---------------------------------------------------------------------------
 
 
 def test_exact_duplicate_rows_collapse_to_one_and_are_counted():
@@ -49,21 +101,23 @@ def test_exact_duplicate_rows_collapse_to_one_and_are_counted():
     assert result.missing_dedup_identity_rows == 0
 
 
-def test_placeholder_row_is_superseded_by_final_stop_reason_row():
-    """Spec: within one key, the row whose stop_reason is not null wins over
-    an earlier null-stop_reason placeholder, but occurred_at still comes
-    from the first row. A broken implementation would either keep the
-    placeholder's output_tokens=1 or take occurred_at from the final row."""
+def test_placeholder_row_is_superseded_and_occurred_at_is_the_adopted_rows():
+    """Spec (round 2): the adopted row is the last non-empty-stop_reason
+    row, and Fact.occurred_at_utc comes from *that adopted row*, not the
+    first row. Here the null-stop_reason placeholder (00:00:00) is
+    superseded by the end_turn row (00:00:05), so occurred_at must be
+    00:00:05. A broken implementation stuck on round-1's "first row"
+    occurred_at rule would report 00:00:00 instead."""
     result = parse_session_detailed(_fixture("placeholder_then_final.jsonl"))
     output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
     assert output_tokens == [500]
     assert result.conflicting_duplicate_groups == 1
-    assert all(f.occurred_at_utc.isoformat().startswith("2026-06-01T00:00:00") for f in result.facts)
+    assert all(f.occurred_at_utc.isoformat().startswith("2026-06-01T00:00:05") for f in result.facts)
     assert result.duplicate_rows_skipped == 1
 
 
 def test_all_null_stop_reason_falls_back_to_last_row_and_flags_conflict():
-    """Spec: when no row in the group has a non-null stop_reason, the last
+    """Spec: when no row in the group has a non-empty stop_reason, the last
     row's usage is adopted. A broken implementation would keep the first
     row's usage (output=10) instead of the last (output=20), or fail to
     flag the conflict since usage genuinely differs."""
@@ -84,53 +138,210 @@ def test_nonbilling_field_difference_is_not_a_conflict():
     assert result.duplicate_rows_skipped == 1
 
 
+# ---------------------------------------------------------------------------
+# Full-pair-only identity (round 2: single-ID fallback abolished)
+# ---------------------------------------------------------------------------
+
+
 def test_rows_missing_both_identities_are_emitted_individually():
     """Spec: rows with neither message.id nor requestId are never deduped
-    against each other and are each counted in
-    missing_dedup_identity_rows. A broken implementation would either drop
-    one of the two rows or fail to increment the counter."""
+    against each other, are each counted in missing_dedup_identity_rows,
+    and each carry source_quality == "identity_missing". A broken
+    implementation would either drop one of the two rows or fail to
+    increment the counter / set source_quality."""
     result = parse_session_detailed(_fixture("missing_both_ids.jsonl"))
     assert sum(f.tokens for f in result.facts) == (10 + 5) * 2
     assert result.missing_dedup_identity_rows == 2
     assert result.duplicate_rows_skipped == 0
+    assert all(f.source_quality == "identity_missing" for f in result.facts)
 
 
-def test_fallback_key_message_id_only_when_request_id_absent():
-    """Spec: with requestId absent on both rows, message.id alone is the
-    dedup key -- the two rows must still collapse to one. A broken
-    implementation would treat rows without requestId as having no
-    identity at all (double-counting them as missing_dedup_identity_rows)."""
+def test_message_id_only_match_no_longer_merges_round2():
+    """Spec (round 2): single-ID fallback is abolished -- two rows sharing
+    only message.id (no requestId on either) must NOT collapse into one.
+    Each is emitted individually and counted as missing_dedup_identity_rows.
+    A broken implementation still running round-1's fallback rule would
+    merge them into 1 row and report duplicate_rows_skipped=1, missing=0."""
     result = parse_session_detailed(_fixture("fallback_message_id_only.jsonl"))
-    assert sum(f.tokens for f in result.facts) == 30 + 15
-    assert result.duplicate_rows_skipped == 1
-    assert result.missing_dedup_identity_rows == 0
+    assert sum(f.tokens for f in result.facts) == (30 + 15) * 2
+    assert result.duplicate_rows_skipped == 0
+    assert result.missing_dedup_identity_rows == 2
+    assert all(f.source_quality == "identity_missing" for f in result.facts)
 
 
-def test_fallback_key_request_id_only_when_message_id_absent():
-    """Spec: with message.id absent on both rows, requestId alone is the
-    dedup key -- symmetric case to the message.id-only fallback above."""
+def test_request_id_only_match_no_longer_merges_round2():
+    """Spec (round 2): symmetric case -- two rows sharing only requestId
+    (no message.id on either) must NOT collapse into one either."""
     result = parse_session_detailed(_fixture("fallback_request_id_only.jsonl"))
-    assert sum(f.tokens for f in result.facts) == 40 + 20
-    assert result.duplicate_rows_skipped == 1
-    assert result.missing_dedup_identity_rows == 0
+    assert sum(f.tokens for f in result.facts) == (40 + 20) * 2
+    assert result.duplicate_rows_skipped == 0
+    assert result.missing_dedup_identity_rows == 2
+    assert all(f.source_quality == "identity_missing" for f in result.facts)
 
 
-def test_interleaved_keys_keep_first_seen_order_and_first_occurred_at():
-    """Spec: facts order and occurred_at both follow *first-seen* position,
-    not last. For an A, B, A row sequence, all of key A's facts must come
-    before key B's in the output, and A's occurred_at must be the first
-    A row's timestamp (00:00:00), not the repeated third row's
-    (00:02:00). A broken implementation might sort by last-seen or use the
-    last row's timestamp for the surviving fact."""
+def test_f_single_id_match_does_not_merge_distinct_usage(tmp_path):
+    """Spec item F: requestId absent on both rows, same message.id, but
+    with genuinely different usage (10 vs 20 output tokens) -- token total
+    must be 30 (both rows counted) and missing_dedup_identity_rows must be
+    2. A broken implementation still merging on message.id alone would
+    report a token total of only 20 (last-row-wins) or 10 (first-row-wins)
+    and missing=0."""
+    result = parse_session_detailed(_fixture("single_id_match_no_merge.jsonl"))
+    output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
+    assert sorted(output_tokens) == [10, 20]
+    assert sum(output_tokens) == 30
+    assert result.missing_dedup_identity_rows == 2
+    assert result.duplicate_rows_skipped == 0
+
+
+def test_a_non_string_or_empty_identities_are_identity_missing_not_a_crash():
+    """Spec item A: message.id as a list, requestId as a number, and
+    message.id as an empty string must each be treated as "not a valid
+    identity" (non-string or empty), never merged, and must not raise --
+    the reader must not try to hash/compare a list or treat "" as present.
+    A broken implementation would crash on the unhashable list id, or
+    treat the empty string / number as a usable identity."""
+    result = parse_session_detailed(_fixture("non_string_ids.jsonl"))
+    assert result.malformed_events == 0
+    assert result.missing_dedup_identity_rows == 3
+    assert result.duplicate_rows_skipped == 0
+    assert result.conflicting_duplicate_groups == 0
+    assert all(f.source_quality == "identity_missing" for f in result.facts)
+    assert sum(f.tokens for f in result.facts) == (10 + 1) + (20 + 2) + (30 + 3)
+
+
+# ---------------------------------------------------------------------------
+# stop_reason adoption edge cases (round 2 item B)
+# ---------------------------------------------------------------------------
+
+
+def test_b1_conflicting_row_after_completion_row_wins_adoption():
+    """Spec item B(i): a non-empty-stop_reason row (output=10) is followed,
+    within the same key, by a null-stop_reason row with a *different*
+    signature (output=20). Because a later row disagrees with the
+    candidate, the adopted row becomes the group's last row regardless of
+    stop_reason -- output must be 20, and conflict must be flagged. A
+    broken implementation that always trusts the first non-null
+    stop_reason row would report output=10 and might miss the conflict."""
+    result = parse_session_detailed(_fixture("stop_reason_conflict_after_completion.jsonl"))
+    output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
+    assert output_tokens == [20]
+    assert result.conflicting_duplicate_groups == 1
+
+
+def test_b2_empty_string_stop_reason_is_not_treated_as_complete():
+    """Spec item B(ii): stop_reason == "" (empty string) must not count as
+    a completed row. With every row in the group at stop_reason="", there
+    is no adoption candidate, so the group falls back to the last row --
+    same rule as the all-null case. A broken implementation treating ""
+    as a valid non-empty stop_reason would still land on the last row
+    here (it's also the group's last completion), so the binding check is
+    conflict detection: a false "no conflict" would mean the two rows'
+    differing usage was never compared at all."""
+    result = parse_session_detailed(_fixture("stop_reason_empty_string_not_complete.jsonl"))
+    output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
+    assert output_tokens == [20]
+    assert result.conflicting_duplicate_groups == 1
+
+
+def test_b3_multiple_completion_rows_with_differing_signature_last_completion_wins():
+    """Spec item B(iii): two rows both have a non-empty stop_reason but
+    different signatures, and the candidate (last non-empty-stop_reason
+    row) is also the group's last row -- so no "later disagreeing row"
+    exists to override it. The adopted row must be that last completion
+    row (output=20) per the plain candidate rule. A broken implementation
+    might instead prefer the first completion row (output=10)."""
+    result = parse_session_detailed(_fixture("multiple_completions_conflict.jsonl"))
+    output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
+    assert output_tokens == [20]
+    assert result.conflicting_duplicate_groups == 1
+
+
+# ---------------------------------------------------------------------------
+# Billing signature dimensions (round 2 item C)
+# ---------------------------------------------------------------------------
+
+SIGNATURE_DIMENSION_OVERRIDES = {
+    "model": {},  # handled via the model= kwarg instead of a usage override
+    "mode": {"speed": "fast"},
+    "input_nocache": {"input_tokens": 200},
+    "cache_read": {"cache_read_input_tokens": 99},
+    "cache_write_5m": {
+        "cache_creation_input_tokens": 61,
+        "cache_creation": {"ephemeral_5m_input_tokens": 31, "ephemeral_1h_input_tokens": 20},
+    },
+    "cache_write_1h": {
+        "cache_creation_input_tokens": 61,
+        "cache_creation": {"ephemeral_5m_input_tokens": 30, "ephemeral_1h_input_tokens": 21},
+    },
+    # leftover = cache_creation_input_tokens - (5m + 1h): base leftover is
+    # 60 - 50 = 10; bumping the total to 70 with the same 5m/1h breakdown
+    # changes only the leftover (cache_write_unknown), nothing else.
+    "cache_write_unknown": {"cache_creation_input_tokens": 70},
+    "output": {"output_tokens": 80},
+}
+
+
+@pytest.mark.parametrize("dimension", sorted(SIGNATURE_DIMENSION_OVERRIDES))
+def test_c_each_billing_signature_dimension_alone_triggers_conflict(tmp_path, dimension):
+    """Spec item C: billing signature = (model, mode, input_nocache,
+    cache_read, cache_write_5m, cache_write_1h, cache_write_unknown,
+    output). Changing exactly one of these 8 dimensions between two
+    otherwise-identical duplicate rows must be detected as a conflict
+    (>= 2 distinct signatures) and must still collapse to 1 duplicate
+    skipped. A broken implementation comparing only a subset of these
+    fields (e.g. omitting mode, or computing cache_write_unknown wrong)
+    would report conflicting_duplicate_groups == 0 for that one
+    dimension."""
+    base_usage = _sig_usage()
+    changed_usage = _sig_usage()
+    model = "claude-opus-4-8"
+    if dimension == "model":
+        model = "claude-sonnet-5"
+    else:
+        changed_usage.update(SIGNATURE_DIMENSION_OVERRIDES[dimension])
+
+    events = [
+        _sig_event("2026-06-01T00:00:00Z", base_usage),
+        _sig_event("2026-06-01T00:00:05Z", changed_usage, model=model),
+    ]
+    path = tmp_path / f"sig_{dimension}.jsonl"
+    _write_jsonl(path, events)
+
+    result = parse_session_detailed(path)
+    assert result.conflicting_duplicate_groups == 1, dimension
+    assert result.duplicate_rows_skipped == 1, dimension
+
+
+# ---------------------------------------------------------------------------
+# Ordering / occurred_at / per-file scoping / compatibility
+# ---------------------------------------------------------------------------
+
+
+def test_interleaved_keys_keep_first_seen_facts_order_with_adopted_occurred_at():
+    """Spec: facts *order* still follows first-seen key position (A's
+    facts precede B's, since A appears first in the file), but each key's
+    occurred_at is now its *adopted* row's timestamp. Key A's group is
+    rows at 00:00:00 and 00:02:00 (both end_turn, same signature) -> the
+    candidate is the last one (00:02:00), and there's no later
+    disagreeing row, so A's facts carry occurred_at=00:02:00 even though
+    they are positioned before B's facts (which carry 00:01:00). A broken
+    implementation reusing round-1's "occurred_at = first row" rule would
+    report 00:00:00 for A instead."""
     result = parse_session_detailed(_fixture("interleaved_aba.jsonl"))
-    timestamps_in_order = [f.occurred_at_utc.isoformat() for f in result.facts]
-    assert timestamps_in_order, "expected at least one fact"
-    # No fact should carry the second A row's timestamp (00:02:00) -- that
-    # would mean occurred_at was taken from the last row, not the first.
-    assert all(not ts.startswith("2026-06-01T00:02:00") for ts in timestamps_in_order)
-    # Key A (00:00:00) must appear before key B (00:01:00) throughout.
-    first_b_index = next(i for i, ts in enumerate(timestamps_in_order) if ts.startswith("2026-06-01T00:01:00"))
-    assert all(ts.startswith("2026-06-01T00:00:00") for ts in timestamps_in_order[:first_b_index])
+    # Key A's usage is (input=10, output=1); key B's is (input=20, output=2)
+    # -- these values are unique enough to identify which fact belongs to
+    # which key without relying on occurred_at.
+    a_indices = [i for i, f in enumerate(result.facts) if f.tokens in (10, 1)]
+    b_indices = [i for i, f in enumerate(result.facts) if f.tokens in (20, 2)]
+    assert len(a_indices) == 2
+    assert len(b_indices) == 2
+    assert max(a_indices) < min(b_indices), "key A's facts must precede key B's (first-seen order)"
+
+    a_facts = [result.facts[i] for i in a_indices]
+    b_facts = [result.facts[i] for i in b_indices]
+    assert all(f.occurred_at_utc.isoformat().startswith("2026-06-01T00:02:00") for f in a_facts)
+    assert all(f.occurred_at_utc.isoformat().startswith("2026-06-01T00:01:00") for f in b_facts)
     assert result.duplicate_rows_skipped == 1
 
 
@@ -168,6 +379,35 @@ def test_parse_session_facts_stays_a_two_tuple_matching_detailed():
     assert malformed == detailed.malformed_events
 
 
+# ---------------------------------------------------------------------------
+# Month boundary (round 2 item D)
+# ---------------------------------------------------------------------------
+
+
+def test_d_adopted_timestamp_crossing_month_boundary_drives_window_filtering():
+    """Spec item D: a null-stop_reason placeholder at 2026-05-31T23:59:59Z
+    (output=1) is superseded by an end_turn row at 2026-06-01T00:00:01Z
+    (output=20). Because occurred_at is the *adopted* row's timestamp, the
+    surviving output fact (20 tokens) is attributed to June: it must
+    appear in a --since 2026-06-01 window and must NOT appear in a
+    --until 2026-05-31 window. A broken implementation using the first
+    row's (May) timestamp would flip both of these window checks."""
+    result = parse_session_detailed(_fixture("month_boundary_placeholder_then_final.jsonl"))
+    output_facts = [f for f in result.facts if f.token_kind == "output"]
+    assert len(output_facts) == 1
+    assert output_facts[0].tokens == 20
+
+    since_june = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    until_may = datetime(2026, 5, 31, tzinfo=timezone.utc)
+    assert list(filter_facts(result.facts, since_utc=since_june)) != []
+    assert list(filter_facts(result.facts, until_utc=until_may)) == []
+
+
+# ---------------------------------------------------------------------------
+# measure/v1 contract additions
+# ---------------------------------------------------------------------------
+
+
 def test_measure_json_exposes_dedup_counters_and_producer_metadata(tmp_path, monkeypatch, capsys):
     """Spec: measure's data_quality must carry the 3 new counters, and the
     top level must carry producer_version (matching agent_cost.__version__)
@@ -196,3 +436,41 @@ def test_measure_json_exposes_dedup_counters_and_producer_metadata(tmp_path, mon
     assert dq["missing_dedup_identity_rows"] == 0
     assert payload["producer_version"] == agent_cost.__version__
     assert payload["accounting_basis"] == "agent-cost-raw-total/v2"
+
+
+def test_e_measure_dedup_counters_do_not_leak_across_unrequested_sessions(tmp_path, monkeypatch, capsys):
+    """Spec item E: the 3 dedup counters in measure's data_quality must be
+    scoped to the *requested* session id(s), not summed globally over
+    every fact read from disk. A fixture has a clean "requested" session
+    and a dirty "unrequested" session (1 conflicting duplicate group + 1
+    identity-missing row). Querying --session-id requested must report
+    all 3 counters as 0; querying --session-id unrequested must report
+    them non-zero. A broken implementation reusing the
+    malformed_events/skipped_files pattern (summed once over the whole
+    read, before session filtering) would leak the dirty session's counts
+    into the clean session's report."""
+    claude_home = tmp_path / "claude_home"
+    codex_home = tmp_path / "codex_home"
+    claude_home.mkdir()
+    codex_home.mkdir()
+    monkeypatch.setenv("CLAUDE_HOME", str(claude_home))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.delenv("AGENT_COST_CONFIG", raising=False)
+
+    project_dir = claude_home / "projects" / "-fixture-proj"
+    project_dir.mkdir(parents=True)
+    (project_dir / "session.jsonl").write_text(_fixture("measure_global_leakage.jsonl").read_text())
+
+    rc = cli.main(["measure", "--session-id", "requested", "--format", "json"])
+    assert rc == 0
+    clean_dq = json.loads(capsys.readouterr().out)["data_quality"]
+    assert clean_dq["duplicate_rows_skipped"] == 0
+    assert clean_dq["conflicting_duplicate_groups"] == 0
+    assert clean_dq["missing_dedup_identity_rows"] == 0
+
+    rc = cli.main(["measure", "--session-id", "unrequested", "--format", "json"])
+    assert rc == 0
+    dirty_dq = json.loads(capsys.readouterr().out)["data_quality"]
+    assert dirty_dq["conflicting_duplicate_groups"] == 1
+    assert dirty_dq["missing_dedup_identity_rows"] == 1
+    assert dirty_dq["duplicate_rows_skipped"] == 1

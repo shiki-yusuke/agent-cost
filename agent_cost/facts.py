@@ -30,9 +30,12 @@ MODES = ("fast", "normal", "unknown")
 # covers the ordinary case; readers add a more specific value only when a
 # fact's derivation has a real, nameable caveat worth surfacing downstream
 # (e.g. Codex's first delta in a rollout is measured against an assumed
-# zero baseline). This is never left unset -- every Fact defaults to "ok"
-# so export never emits a null source_quality.
-SOURCE_QUALITY_VALUES = ("ok", "first_event_delta")
+# zero baseline; Claude's reader can't dedup a row that lacks a full
+# (message.id, requestId) pair, so it emits that row individually and
+# flags it "identity_missing" rather than silently treating it as "ok").
+# This is never left unset -- every Fact defaults to "ok" so export never
+# emits a null source_quality.
+SOURCE_QUALITY_VALUES = ("ok", "first_event_delta", "identity_missing")
 
 _BRACKET_SUFFIX = re.compile(r"\[[^\]]*\]$")
 _DATE_SUFFIX = re.compile(r"@\d{6,8}$")
