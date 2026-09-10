@@ -90,6 +90,11 @@ class DataQuality:
     skipped_files: int = 0
     negative_deltas: int = 0
     unpriced_tokens: int = 0
+    # Claude-only dedup diagnostics (see readers/claude.py's
+    # parse_session_detailed docstring); always 0 for Codex facts.
+    duplicate_rows_skipped: int = 0
+    conflicting_duplicate_groups: int = 0
+    missing_dedup_identity_rows: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -97,6 +102,9 @@ class DataQuality:
             "skipped_files": self.skipped_files,
             "negative_deltas": self.negative_deltas,
             "unpriced_tokens": self.unpriced_tokens,
+            "duplicate_rows_skipped": self.duplicate_rows_skipped,
+            "conflicting_duplicate_groups": self.conflicting_duplicate_groups,
+            "missing_dedup_identity_rows": self.missing_dedup_identity_rows,
         }
 
 

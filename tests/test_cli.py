@@ -341,6 +341,9 @@ def test_report_json_schema_is_locked(tmp_path, monkeypatch, capsys):
         "skipped_files",
         "negative_deltas",
         "unpriced_tokens",
+        "duplicate_rows_skipped",
+        "conflicting_duplicate_groups",
+        "missing_dedup_identity_rows",
     }
 
     row_columns = {
@@ -677,6 +680,8 @@ def test_measure_json_schema_is_locked(tmp_path, monkeypatch, capsys):
 
     assert set(payload.keys()) == {
         "protocol_version",
+        "producer_version",
+        "accounting_basis",
         "generated_at",
         "window",
         "timezone",
@@ -688,6 +693,7 @@ def test_measure_json_schema_is_locked(tmp_path, monkeypatch, capsys):
         "data_quality",
     }
     assert payload["protocol_version"] == "measure/v1"
+    assert payload["accounting_basis"] == "agent-cost-raw-total/v2"
     assert set(payload["window"].keys()) == {"since", "until"}
     assert set(payload["rates"].keys()) == {"catalog_version", "sha256"}
     assert set(payload["data_quality"].keys()) == {
@@ -695,6 +701,9 @@ def test_measure_json_schema_is_locked(tmp_path, monkeypatch, capsys):
         "skipped_files",
         "negative_deltas",
         "unpriced_tokens",
+        "duplicate_rows_skipped",
+        "conflicting_duplicate_groups",
+        "missing_dedup_identity_rows",
         "source_quality",
     }
     assert set(payload["data_quality"]["source_quality"].keys()) == set(SOURCE_QUALITY_VALUES)

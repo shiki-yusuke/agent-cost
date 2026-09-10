@@ -25,6 +25,15 @@ from .renderers import render_csv, render_json, render_table
 #: should check this before trusting the shape of the payload.
 MEASURE_PROTOCOL_VERSION = "measure/v1"
 
+#: Identifies the token-accounting semantics behind measure's numbers, not
+#: the JSON shape (that's MEASURE_PROTOCOL_VERSION). "v2" marks the fix for
+#: the Claude reader's row-per-content-block over-count (agent-cost 0.2.0);
+#: "v1" numbers (agent-cost 0.1.x) are not comparable to "v2" numbers for
+#: Claude facts. A consumer that persists historical measurements (e.g.
+#: lane's ledger) should key on this, not on producer_version alone, since
+#: a future producer_version could still share the same accounting_basis.
+ACCOUNTING_BASIS = "agent-cost-raw-total/v2"
+
 
 def _parse_window_bound(value: Optional[str], tz: ZoneInfo) -> Optional[datetime]:
     if not value:
@@ -53,6 +62,9 @@ def _collect_facts(config, *, agents: set, exclude_archived: bool):
         facts.extend(result.facts)
         dq.malformed_events += result.malformed_events
         dq.skipped_files += result.skipped_files
+        dq.duplicate_rows_skipped += result.duplicate_rows_skipped
+        dq.conflicting_duplicate_groups += result.conflicting_duplicate_groups
+        dq.missing_dedup_identity_rows += result.missing_dedup_identity_rows
 
     if "codex" in agents and config.codex_db_path.exists():
         result = codex_reader.read_codex_facts(
@@ -208,6 +220,8 @@ def cmd_measure(args) -> int:
 
     payload = {
         "protocol_version": MEASURE_PROTOCOL_VERSION,
+        "producer_version": __version__,
+        "accounting_basis": ACCOUNTING_BASIS,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "window": {
             "since": since.isoformat() if since else None,
@@ -227,6 +241,9 @@ def cmd_measure(args) -> int:
             "skipped_files": dq.skipped_files,
             "negative_deltas": dq.negative_deltas,
             "unpriced_tokens": total_dq.unpriced_tokens,
+            "duplicate_rows_skipped": dq.duplicate_rows_skipped,
+            "conflicting_duplicate_groups": dq.conflicting_duplicate_groups,
+            "missing_dedup_identity_rows": dq.missing_dedup_identity_rows,
             "source_quality": quality_counts,
         },
     }

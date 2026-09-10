@@ -386,12 +386,20 @@ def test_live_measure_output_matches_vendored_contract_key_shape(tmp_path, monke
 
     vendored = _load_fixture("accept-matched-normal.json")
 
-    assert set(live_payload.keys()) == set(vendored.keys())
-    assert set(live_payload["rates"].keys()) == set(vendored["rates"].keys())
-    assert set(live_payload["window"].keys()) == set(vendored["window"].keys())
-    assert set(live_payload["data_quality"].keys()) == set(vendored["data_quality"].keys())
-    assert set(live_payload["data_quality"]["source_quality"].keys()) == set(
-        vendored["data_quality"]["source_quality"].keys()
+    # measure/v1 is an open schema (additionalProperties not restricted, see
+    # measure-output.schema.json's own description): the vendored fixture's
+    # keys are the required floor, not a ceiling. agent-cost 0.2.0 adds
+    # `producer_version`, `accounting_basis` and three dedup counters under
+    # `data_quality` (see readers/claude.py's parse_session_detailed) --
+    # additive fields a still-conformant payload is free to carry that an
+    # older vendored fixture doesn't know about. Assert the floor is present
+    # (subset), not that the live shape equals the fixture exactly.
+    assert set(vendored.keys()) <= set(live_payload.keys())
+    assert set(vendored["rates"].keys()) <= set(live_payload["rates"].keys())
+    assert set(vendored["window"].keys()) <= set(live_payload["window"].keys())
+    assert set(vendored["data_quality"].keys()) <= set(live_payload["data_quality"].keys())
+    assert set(vendored["data_quality"]["source_quality"].keys()) <= set(
+        live_payload["data_quality"]["source_quality"].keys()
     )
 
     live_session = live_payload["sessions"]["session-live"]

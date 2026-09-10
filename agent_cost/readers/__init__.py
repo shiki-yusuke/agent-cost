@@ -24,3 +24,8 @@ class ReadResult:
     # `data_quality` (which is reader-agnostic); surfaced for `doctor` /
     # tests.
     tokens_used_diffs: int = 0
+    # Claude-only dedup diagnostics (see readers/claude.py's
+    # parse_session_detailed docstring). Always 0 for the Codex reader.
+    duplicate_rows_skipped: int = 0
+    conflicting_duplicate_groups: int = 0
+    missing_dedup_identity_rows: int = 0
