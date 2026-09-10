@@ -1,0 +1,1 @@
+{"type":"assistant","timestamp":"2026-06-01T00:00:00Z","sessionId":"s-nsm-single","requestId":"req-nsm-1","message":{"id":"msg-nsm-1","model":["claude-sonnet-5"],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}}

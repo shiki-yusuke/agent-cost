@@ -68,7 +68,13 @@ import pytest
 import agent_cost
 from agent_cost import cli
 from agent_cost.aggregate import filter_facts, scope_dedup_units
-from agent_cost.readers.claude import ClaudeDedupUnit, parse_session_detailed, parse_session_facts, read_claude_facts
+from agent_cost.readers.claude import (
+    ClaudeDedupUnit,
+    normalize_model_key,
+    parse_session_detailed,
+    parse_session_facts,
+    read_claude_facts,
+)
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "dedup"
 
@@ -752,3 +758,74 @@ def test_e_measure_dedup_counters_do_not_leak_across_unrequested_sessions(tmp_pa
     assert dirty_dq["conflicting_duplicate_groups"] == 1
     assert dirty_dq["missing_dedup_identity_rows"] == 1
     assert dirty_dq["duplicate_rows_skipped"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Non-string ``message.model`` values (E0-a3 follow-up contract, given by the
+# architect for this round): a full-pair (message.id, requestId) key is
+# valid dedup identity regardless of what type ``message.model`` carries.
+# ``model`` is not part of ``_valid_id``'s check (readers/claude.py:130-139
+# only validates ``message.id``/``requestId``), so a non-string ``model``
+# must never abort dedup or raise -- it must be preserved verbatim on
+# ``model_raw`` and reduced to a hashable key via
+# ``agent_cost.readers.claude.normalize_model_key`` (facts.py:46-69, whose
+# docstring is silent on list/dict input, so this suite treats "whatever
+# that function currently returns for this input" as the contract, per the
+# task's own instruction, rather than hand-deriving a literal string here).
+# readers/claude.py:161-167's docstring is explicit about *why*
+# normalize_model_key is called at all for a signature tuple: "a malformed
+# transcript could carry a list/dict there, and a tuple with an unhashable
+# element can't go into the set built in parse_session_detailed" -- i.e.
+# the reader is documented to anticipate exactly this input shape and must
+# not crash on it.
+# ---------------------------------------------------------------------------
+
+
+def test_non_string_model_list_on_single_row_does_not_raise_and_emits_facts():
+    """Spec: a full-pair-identity row (valid message.id + requestId, per
+    readers/claude.py:130-139's ``_valid_id``) whose ``message.model`` is a
+    list must be processed like any other row -- no exception, one row's
+    worth of facts emitted, ``model_raw`` preserved as the original list,
+    and ``model_key`` equal to running that same list through
+    ``normalize_model_key`` (facts.py:46-69), the documented reduction step
+    per readers/claude.py:161-167. A broken implementation would either
+    raise (e.g. trying to hash the list directly instead of normalizing it
+    first) or silently coerce ``model_raw`` to a string/``"(unknown)"``
+    instead of preserving the original value."""
+    result = parse_session_detailed(_fixture("non_string_model_single.jsonl"))
+    assert result.malformed_events == 0
+    assert result.duplicate_rows_skipped == 0
+    assert result.conflicting_duplicate_groups == 0
+    assert result.missing_dedup_identity_rows == 0
+    assert sum(f.tokens for f in result.facts) == 10 + 5
+    expected_key = normalize_model_key(["claude-sonnet-5"])
+    for f in result.facts:
+        assert f.model_raw == ["claude-sonnet-5"]
+        assert f.model_key == expected_key
+        assert f.source_quality == "ok"
+
+
+def test_non_string_model_dict_duplicate_rows_collapse_to_one_no_conflict():
+    """Spec: two rows sharing one full-pair key, identical usage, and the
+    *same* non-string (dict) ``message.model`` on both, must dedup exactly
+    like the all-string case in
+    ``test_exact_duplicate_rows_collapse_to_one_and_are_counted`` above --
+    one row's worth of facts, ``duplicate_rows_skipped == 1``, zero
+    conflicts -- since ``_input_signature`` (readers/claude.py:142-176)
+    normalizes ``model_raw`` before comparing, so two equal dicts produce
+    the same signature entry rather than failing to compare or being
+    unhashable. A broken implementation would either raise when building
+    the ``input_signatures`` set (readers/claude.py:480) from an unhashable
+    dict, or fail to recognize the two rows' models as equal and
+    false-positive a conflict."""
+    result = parse_session_detailed(_fixture("non_string_model_dict_duplicate.jsonl"))
+    assert result.malformed_events == 0
+    assert result.duplicate_rows_skipped == 1
+    assert result.conflicting_duplicate_groups == 0
+    assert result.missing_dedup_identity_rows == 0
+    assert sum(f.tokens for f in result.facts) == 7 + 3
+    expected_key = normalize_model_key({"name": "x"})
+    for f in result.facts:
+        assert f.model_raw == {"name": "x"}
+        assert f.model_key == expected_key
+        assert f.source_quality == "ok"

@@ -391,8 +391,8 @@ def test_live_measure_output_matches_vendored_contract_key_shape(tmp_path, monke
     # keys are the required floor, not a ceiling. agent-cost 0.2.0 adds
     # `producer_version`, `accounting_basis` and three dedup counters under
     # `data_quality` (see readers/claude.py's parse_session_detailed) --
-    # additive fields a still-conformant payload is free to carry that an
-    # older vendored fixture doesn't know about. Assert the floor is present
+    # additive fields that a still-conformant payload is free to carry, which
+    # an older vendored fixture doesn't know about. Assert the floor is present
     # (subset), not that the live shape equals the fixture exactly.
     assert set(vendored.keys()) <= set(live_payload.keys())
     assert set(vendored["rates"].keys()) <= set(live_payload["rates"].keys())

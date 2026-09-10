@@ -157,9 +157,17 @@ def _input_signature(model_raw, tokens: dict) -> tuple:
     a session-id mismatch within one dedup group would be a different
     kind of anomaly than a usage conflict, worth a separate diagnostic
     rather than folding into this one.
+
+    ``model_raw`` is run through ``normalize_model_key`` before going into
+    the tuple -- not to normalize away cosmetic variants (this signature
+    only feeds equality/hashing within one dedup group, never pricing),
+    but because a malformed transcript could carry a list/dict there, and
+    a tuple with an unhashable element can't go into the ``set`` built in
+    ``parse_session_detailed``; ``normalize_model_key`` always returns a
+    plain, hashable ``str``.
     """
     return (
-        model_raw,
+        normalize_model_key(model_raw),
         tokens.get("input_nocache", 0),
         tokens.get("cache_read", 0),
         tokens.get("cache_write_5m", 0),

@@ -86,7 +86,15 @@ facts from 0.1.x and 0.2.0+ are not directly comparable. See "Fixed" below.
 
 Do not diff or backfill a 0.1.x Claude measurement against a 0.2.0+ one as
 if they measure the same thing -- the 0.1.x number is inflated by the bug
-above. If you need a corrected historical figure, re-run `measure` against
-the same local logs under 0.2.0+; don't assume a fixed multiplier, since
-the amount of over-counting depends on how many content blocks each
-message happened to have.
+above. Don't assume a fixed multiplier to "correct" it, either, since the
+amount of over-counting depends on how many content blocks each message
+happened to have.
+
+If a consumer already recorded a 0.1.x measurement, apply a correction on
+the consumer side (e.g. a recorded note or adjustment factor keyed on
+`accounting_basis`) rather than re-running `measure` and overwriting the
+stored value -- the original figure is what was actually acted on at the
+time, and overwriting it erases that record. If you do choose to
+re-measure, keep both numbers: record the new `producer_version` and
+`accounting_basis` alongside the new figure, and do not overwrite the old
+value.
