@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-06-01T00:00:00Z","sessionId":"s-nonbilling","requestId":"req-4","message":{"id":"msg-4","model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":50,"iterations":1}}}
+{"type":"assistant","timestamp":"2026-06-01T00:00:05Z","sessionId":"s-nonbilling","requestId":"req-4","message":{"id":"msg-4","model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":50,"iterations":2}}}

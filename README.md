@@ -178,9 +178,33 @@ scraping `report`.
 agent-cost only reads data that is already on disk. It never talks to the
 network, never calls `gh`, and never resolves branches or PRs.
 
-- **Claude Code**: every `assistant` message's `usage` block is one billing
-  event, attributed to the exact model on that event (a session that
-  switches models mid-conversation is not folded into one "primary model").
+- **Claude Code**: every logical assistant message is one billing event,
+  attributed to the exact model on that event (a session that switches
+  models mid-conversation is not folded into one "primary model"). Claude
+  Code's transcript writes one JSONL line per content block of the same
+  message, and those lines are deduplicated first -- but only when a row
+  carries a full `message.id` + `requestId` pair; a row missing either
+  half is emitted on its own (never merged) and flagged
+  `source_quality: "identity_missing"` rather than assumed
+  billing-accurate. `identity_missing` facts are still priced and included
+  in rows/totals; the flag is a warning, not an exclusion or an unpriced
+  status. A message's lines don't necessarily repeat an identical `usage`
+  block: `model` and the input-side fields (input tokens, cache read,
+  cache-write TTL breakdown) stay the same across a message's lines, but
+  `output_tokens` typically grows line by line as the response streams in,
+  and intermediate lines usually lack `usage.speed` entirely (reported as
+  mode `"unknown"`), with only the final line carrying a concrete mode.
+  Within a deduplicated group, `model` or an input-side field that
+  actually differs across the group's rows, two rows disagreeing on a
+  *concrete* mode (`"normal"` vs `"fast"`), or an `output_tokens` value
+  that decreases or is non-monotonic across them, is counted in
+  `data_quality.conflicting_duplicate_groups` as a real billing
+  disagreement -- `output_tokens` growing row by row, and mode
+  `"unknown"` mixed with a single concrete mode elsewhere in the group,
+  are both the ordinary streaming pattern just described and are not
+  flagged, since the reader's own cross-check of real transcripts found
+  exactly that pattern in every observed duplicated group. See
+  `CHANGELOG.md`'s 0.2.0 entry.
   When Anthropic's prompt-cache TTL breakdown (5-minute vs 1-hour writes) is
   present in the log, it's used; otherwise the cache-write tokens are priced
   at the 5-minute rate as an explicit **lower bound** and flagged

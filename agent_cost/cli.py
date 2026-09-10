@@ -11,7 +11,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from . import __version__
-from .aggregate import DataQuality, build_rows, filter_facts, rows_totals
+from .aggregate import DataQuality, build_rows, filter_facts, rows_totals, scope_dedup_units
 from .config import load_config
 from .facts import SOURCE_QUALITY_VALUES
 from .rates import RatesValidationError, load_rates
@@ -24,6 +24,15 @@ from .renderers import render_csv, render_json, render_table
 #: a new field is not breaking. Consumers (e.g. lane's TelemetryAdapter)
 #: should check this before trusting the shape of the payload.
 MEASURE_PROTOCOL_VERSION = "measure/v1"
+
+#: Identifies the token-accounting semantics behind measure's numbers, not
+#: the JSON shape (that's MEASURE_PROTOCOL_VERSION). "v2" marks the fix for
+#: the Claude reader's row-per-content-block over-count (agent-cost 0.2.0);
+#: "v1" numbers (agent-cost 0.1.x) are not comparable to "v2" numbers for
+#: Claude facts. A consumer that persists historical measurements (e.g.
+#: lane's ledger) should key on this, not on producer_version alone, since
+#: a future producer_version could still share the same accounting_basis.
+ACCOUNTING_BASIS = "agent-cost-raw-total/v2"
 
 
 def _parse_window_bound(value: Optional[str], tz: ZoneInfo) -> Optional[datetime]:
@@ -45,14 +54,29 @@ def _parse_window_bound(value: Optional[str], tz: ZoneInfo) -> Optional[datetime
 
 
 def _collect_facts(config, *, agents: set, exclude_archived: bool):
+    """Returns ``(facts, dq, claude_dedup_units)``.
+
+    ``dq``'s ``malformed_events``/``skipped_files``/``negative_deltas`` are
+    unscoped file-level totals (unchanged, existing behavior).
+    ``dq.duplicate_rows_skipped``/``conflicting_duplicate_groups``/
+    ``missing_dedup_identity_rows`` are deliberately left at their
+    ``DataQuality`` defaults here (0) rather than filled in from an
+    unscoped total: those three are Claude-only and must always be
+    re-scoped to the caller's actual window (``report``) or requested
+    session ids + window (``measure``) via ``claude_dedup_units`` and
+    ``aggregate.scope_dedup_units`` -- an unscoped total would silently
+    misrepresent a windowed/session-scoped report or measure output.
+    """
     facts: list = []
     dq = DataQuality()
+    claude_dedup_units: list = []
 
     if "claude" in agents:
         result = claude_reader.read_claude_facts(config.claude_projects_dir)
         facts.extend(result.facts)
         dq.malformed_events += result.malformed_events
         dq.skipped_files += result.skipped_files
+        claude_dedup_units.extend(result.claude_dedup_units)
 
     if "codex" in agents and config.codex_db_path.exists():
         result = codex_reader.read_codex_facts(
@@ -65,7 +89,7 @@ def _collect_facts(config, *, agents: set, exclude_archived: bool):
         dq.skipped_files += result.skipped_files
         dq.negative_deltas += result.negative_deltas
 
-    return facts, dq
+    return facts, dq, claude_dedup_units
 
 
 def cmd_report(args) -> int:
@@ -87,10 +111,20 @@ def cmd_report(args) -> int:
         print(f"[error] rates catalog invalid: {exc}", file=sys.stderr)
         return 2
 
-    facts, dq = _collect_facts(config, agents=agents, exclude_archived=args.exclude_archived)
+    facts, dq, claude_dedup_units = _collect_facts(
+        config, agents=agents, exclude_archived=args.exclude_archived
+    )
     facts = list(filter_facts(facts, since_utc=since, until_utc=until, agents=agents))
     rows, agg_dq = build_rows(facts, catalog, group_by=group_by, timezone_name=args.timezone)
     dq.unpriced_tokens = agg_dq.unpriced_tokens
+    # The three dedup counters are Claude-only and always re-scoped to this
+    # report's actual [since, until) window -- see _collect_facts's
+    # docstring for why they aren't filled in from an unscoped total.
+    (
+        dq.duplicate_rows_skipped,
+        dq.conflicting_duplicate_groups,
+        dq.missing_dedup_identity_rows,
+    ) = scope_dedup_units(claude_dedup_units, since_utc=since, until_utc=until)
 
     payload = {
         "schema_version": "1",
@@ -118,7 +152,7 @@ def cmd_export(args) -> int:
     until = _parse_window_bound(args.until, tz)
     agents = set(args.agent.split(",")) if args.agent else {"claude", "codex"}
 
-    facts, _dq = _collect_facts(config, agents=agents, exclude_archived=False)
+    facts, _dq, _claude_dedup_units = _collect_facts(config, agents=agents, exclude_archived=False)
     facts = list(filter_facts(facts, since_utc=since, until_utc=until, agents=agents))
 
     out = open(args.out, "w") if args.out else sys.stdout
@@ -180,7 +214,7 @@ def cmd_measure(args) -> int:
         return 2
 
     config = load_config()
-    facts, dq = _collect_facts(config, agents=agents, exclude_archived=False)
+    facts, dq, claude_dedup_units = _collect_facts(config, agents=agents, exclude_archived=False)
     facts = list(filter_facts(facts, since_utc=since, until_utc=until, agents=agents))
 
     # measure is a per-session query, not a time-bucketed report: group by
@@ -189,6 +223,17 @@ def cmd_measure(args) -> int:
 
     requested = set(session_ids)
     combined_facts = [f for f in facts if f.session_id in requested]
+
+    # The three dedup counters are Claude-only and always re-scoped to
+    # exactly this measure call's requested session ids AND window -- an
+    # unrequested session's conflict/identity-missing rows must never
+    # affect a requested session's counters (see _collect_facts's
+    # docstring and cmd_report's equivalent window-only scoping above).
+    (
+        dedup_rows_skipped,
+        dedup_conflicting_groups,
+        dedup_missing_identity_rows,
+    ) = scope_dedup_units(claude_dedup_units, since_utc=since, until_utc=until, session_ids=requested)
 
     quality_counts = {v: 0 for v in SOURCE_QUALITY_VALUES}
     for f in combined_facts:
@@ -208,6 +253,8 @@ def cmd_measure(args) -> int:
 
     payload = {
         "protocol_version": MEASURE_PROTOCOL_VERSION,
+        "producer_version": __version__,
+        "accounting_basis": ACCOUNTING_BASIS,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "window": {
             "since": since.isoformat() if since else None,
@@ -227,6 +274,9 @@ def cmd_measure(args) -> int:
             "skipped_files": dq.skipped_files,
             "negative_deltas": dq.negative_deltas,
             "unpriced_tokens": total_dq.unpriced_tokens,
+            "duplicate_rows_skipped": dedup_rows_skipped,
+            "conflicting_duplicate_groups": dedup_conflicting_groups,
+            "missing_dedup_identity_rows": dedup_missing_identity_rows,
             "source_quality": quality_counts,
         },
     }

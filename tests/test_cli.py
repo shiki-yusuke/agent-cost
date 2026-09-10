@@ -1,9 +1,18 @@
+import itertools
 import json
 import sqlite3
 from datetime import datetime, timezone
 
 from agent_cost import cli
 from agent_cost.facts import SOURCE_QUALITY_VALUES
+
+# These tests exercise report/measure/export/pricing behavior, not the
+# Claude reader's dedup logic (that lives in tests/test_reader_dedup.py) --
+# so every synthetic event here gets its own unique (message.id, requestId)
+# pair by default, keeping it out of the "identity_missing" / dedup path
+# entirely and preserving each test's original intent (a plain, singular
+# "ok" billing event) under the full-pair-only dedup contract.
+_assistant_event_ids = itertools.count(1)
 
 
 def _write_claude_session(claude_home, slug, session_name, events):
@@ -13,12 +22,25 @@ def _write_claude_session(claude_home, slug, session_name, events):
     path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
 
 
-def _assistant_event(ts, model, input_tokens, output_tokens, session_id="s1"):
+def _assistant_event(
+    ts, model, input_tokens, output_tokens, session_id="s1", message_id=None, request_id=None
+):
+    seq = next(_assistant_event_ids)
+    if message_id is None:
+        message_id = f"synthetic-msg-{seq}"
+    if request_id is None:
+        request_id = f"synthetic-req-{seq}"
     return {
         "type": "assistant",
         "timestamp": ts,
         "sessionId": session_id,
-        "message": {"model": model, "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}},
+        "requestId": request_id,
+        "message": {
+            "id": message_id,
+            "model": model,
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+        },
     }
 
 
@@ -341,6 +363,9 @@ def test_report_json_schema_is_locked(tmp_path, monkeypatch, capsys):
         "skipped_files",
         "negative_deltas",
         "unpriced_tokens",
+        "duplicate_rows_skipped",
+        "conflicting_duplicate_groups",
+        "missing_dedup_identity_rows",
     }
 
     row_columns = {
@@ -442,7 +467,11 @@ def test_measure_unknown_session_id_exits_zero_with_empty_result(tmp_path, monke
         "credits": 0.0,
     }
     assert payload["total"]["totals"]["tokens"] == 0
-    assert payload["data_quality"]["source_quality"] == {"ok": 0, "first_event_delta": 0}
+    assert payload["data_quality"]["source_quality"] == {
+        "ok": 0,
+        "first_event_delta": 0,
+        "identity_missing": 0,
+    }
 
 
 def test_measure_multiple_sessions_claude_and_codex_mixed(tmp_path, monkeypatch, capsys):
@@ -677,6 +706,8 @@ def test_measure_json_schema_is_locked(tmp_path, monkeypatch, capsys):
 
     assert set(payload.keys()) == {
         "protocol_version",
+        "producer_version",
+        "accounting_basis",
         "generated_at",
         "window",
         "timezone",
@@ -688,6 +719,7 @@ def test_measure_json_schema_is_locked(tmp_path, monkeypatch, capsys):
         "data_quality",
     }
     assert payload["protocol_version"] == "measure/v1"
+    assert payload["accounting_basis"] == "agent-cost-raw-total/v2"
     assert set(payload["window"].keys()) == {"since", "until"}
     assert set(payload["rates"].keys()) == {"catalog_version", "sha256"}
     assert set(payload["data_quality"].keys()) == {
@@ -695,6 +727,9 @@ def test_measure_json_schema_is_locked(tmp_path, monkeypatch, capsys):
         "skipped_files",
         "negative_deltas",
         "unpriced_tokens",
+        "duplicate_rows_skipped",
+        "conflicting_duplicate_groups",
+        "missing_dedup_identity_rows",
         "source_quality",
     }
     assert set(payload["data_quality"]["source_quality"].keys()) == set(SOURCE_QUALITY_VALUES)

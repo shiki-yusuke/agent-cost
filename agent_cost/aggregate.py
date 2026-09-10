@@ -84,12 +84,59 @@ def filter_facts(
         yield f
 
 
+def scope_dedup_units(
+    units: Iterable,
+    *,
+    since_utc: Optional[datetime] = None,
+    until_utc: Optional[datetime] = None,
+    session_ids: Optional[set] = None,
+) -> Tuple[int, int, int]:
+    """Re-scope Claude's per-group dedup diagnostics to a window and/or a
+    set of session ids, after the fact.
+
+    ``units`` is duck-typed (each must have ``.occurred_at_utc``,
+    ``.session_id``, ``.duplicate_rows_skipped``, ``.conflicting`` and
+    ``.missing_identity``) rather than imported as
+    ``readers.claude.ClaudeDedupUnit``, to avoid this module depending on
+    a specific reader. Returns
+    ``(duplicate_rows_skipped, conflicting_duplicate_groups,
+    missing_dedup_identity_rows)`` -- the same three counters
+    ``ClaudeParseResult``/``ReadResult`` expose as unscoped file-level
+    totals, but summed only over units that fall inside ``[since_utc,
+    until_utc)`` and, if given, whose ``session_id`` is in
+    ``session_ids``. This mirrors ``filter_facts``'s half-open window
+    semantics so a caller's ``report``/``measure`` window matches exactly
+    what ``build_rows`` priced.
+    """
+    duplicate_rows_skipped = 0
+    conflicting_duplicate_groups = 0
+    missing_dedup_identity_rows = 0
+    for unit in units:
+        if since_utc is not None and unit.occurred_at_utc < since_utc:
+            continue
+        if until_utc is not None and unit.occurred_at_utc >= until_utc:
+            continue
+        if session_ids is not None and unit.session_id not in session_ids:
+            continue
+        duplicate_rows_skipped += unit.duplicate_rows_skipped
+        if unit.conflicting:
+            conflicting_duplicate_groups += 1
+        if unit.missing_identity:
+            missing_dedup_identity_rows += 1
+    return duplicate_rows_skipped, conflicting_duplicate_groups, missing_dedup_identity_rows
+
+
 @dataclass
 class DataQuality:
     malformed_events: int = 0
     skipped_files: int = 0
     negative_deltas: int = 0
     unpriced_tokens: int = 0
+    # Claude-only dedup diagnostics (see readers/claude.py's
+    # parse_session_detailed docstring); always 0 for Codex facts.
+    duplicate_rows_skipped: int = 0
+    conflicting_duplicate_groups: int = 0
+    missing_dedup_identity_rows: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -97,6 +144,9 @@ class DataQuality:
             "skipped_files": self.skipped_files,
             "negative_deltas": self.negative_deltas,
             "unpriced_tokens": self.unpriced_tokens,
+            "duplicate_rows_skipped": self.duplicate_rows_skipped,
+            "conflicting_duplicate_groups": self.conflicting_duplicate_groups,
+            "missing_dedup_identity_rows": self.missing_dedup_identity_rows,
         }
 
 

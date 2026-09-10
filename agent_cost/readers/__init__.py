@@ -24,3 +24,14 @@ class ReadResult:
     # `data_quality` (which is reader-agnostic); surfaced for `doctor` /
     # tests.
     tokens_used_diffs: int = 0
+    # Claude-only dedup diagnostics (see readers/claude.py's
+    # parse_session_detailed docstring). Always 0 / empty for the Codex
+    # reader. The three ints are file-level totals, NOT scoped to any
+    # window or session; `claude_dedup_units` carries the same
+    # information per group/row (as `ClaudeDedupUnit`, duck-typed here to
+    # avoid a circular import with readers.claude) so a caller can
+    # re-scope it -- see `agent_cost.aggregate.scope_dedup_units`.
+    duplicate_rows_skipped: int = 0
+    conflicting_duplicate_groups: int = 0
+    missing_dedup_identity_rows: int = 0
+    claude_dedup_units: List = field(default_factory=list)
