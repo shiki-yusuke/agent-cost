@@ -1,7 +1,7 @@
 """E0-a acceptance-condition hardening tests (architect review round 3).
 
-architect レビューで、既存テストが次の2条件を弱くしか検証していないと
-指摘された。本ファイルはそれぞれ否定側が落ちる形で検証する。
+architect レビュー (3 巡目) と builder レビューで、既存テストが次の条件 A〜E を
+弱くしか検証していないと指摘された。本ファイルはそれぞれ否定側が落ちる形で検証する。
 
 条件A: claude-fable-5 の entry は E0-a (claude-fable-5-1 追加) 前後で
        rate_id・effective_from・effective_until・5単価・aliases・
@@ -31,8 +31,8 @@ architect レビューで、既存テストが次の2条件を弱くしか検証
        rate_id は "claude-sonnet-5-standard-2026-09-01" である
        (同額でも別 rate_id へ改名したら落ちる)。
 
-このファイルは新規作成のみで、既存テストファイル・実装ファイルは
-一切変更していない。
+このファイルは E0-a の rates.json 変更に対する追加テスト。同じ PR で
+tests/test_rates.py の Sonnet 境界テストは値連続性の検証に更新されている。
 """
 
 from datetime import datetime, timezone
