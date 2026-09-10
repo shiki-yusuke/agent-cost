@@ -13,7 +13,7 @@ architect レビューで、既存テストが次の2条件を弱くしか検証
        pricing_status == "unpriced" となり、確定した金額が計上されない。
 
 条件C (PR レビュー3点目・追加分): claude-fable-5-1 の effective_from
-       (2026-08-30T00:00:00+00:00) より前の timestamp の usage は、
+       (2026-09-02T01:17:55+00:00) より前の timestamp の usage は、
        resolver が None を返すだけでなく、価格計算の最終出力
        (build_rows -> Row.to_dict()) で pricing_status == "unpriced"
        かつ確定金額が計上されない。境界ちょうどは priced になる。
@@ -165,7 +165,7 @@ def test_condition_b_claude_fable_5_1_1h_cache_write_is_priced_contrast_case():
 
 
 def test_condition_c_claude_fable_5_1_before_effective_from_is_unpriced_in_final_output():
-    """条件C: effective_from (2026-08-30T00:00:00+00:00) より前の usage は、
+    """条件C: effective_from (2026-09-02T01:17:55+00:00) より前の usage は、
     resolver が None を返すだけでなく build_rows -> Row.to_dict() の最終出力
     でも pricing_status == "unpriced" かつ確定金額 0.0 であること。
 
@@ -179,7 +179,7 @@ def test_condition_c_claude_fable_5_1_before_effective_from_is_unpriced_in_final
             "claude-fable-5-1",
             "input_nocache",
             1_000_000,
-            occurred_at="2026-08-29T23:59:59+00:00",
+            occurred_at="2026-09-02T01:17:54+00:00",
         )
     ]
     rows, dq = build_rows(facts, catalog)
@@ -193,7 +193,7 @@ def test_condition_c_claude_fable_5_1_before_effective_from_is_unpriced_in_final
 
 
 def test_condition_c_claude_fable_5_1_at_effective_from_boundary_is_priced_contrast_case():
-    """対照: effective_from ちょうど (2026-08-30T00:00:00+00:00) の usage は
+    """対照: effective_from ちょうど (2026-09-02T01:17:55+00:00) の usage は
     build_rows -> Row.to_dict() の最終出力で pricing_status == "priced" と
     なり、input_nocache の単価 (10.0/MTok, test_a1 で確認済み) 通りの確定
     金額が計上されること。
@@ -207,7 +207,7 @@ def test_condition_c_claude_fable_5_1_at_effective_from_boundary_is_priced_contr
             "claude-fable-5-1",
             "input_nocache",
             1_000_000,
-            occurred_at="2026-08-30T00:00:00+00:00",
+            occurred_at="2026-09-02T01:17:55+00:00",
         )
     ]
     rows, dq = build_rows(facts, catalog)

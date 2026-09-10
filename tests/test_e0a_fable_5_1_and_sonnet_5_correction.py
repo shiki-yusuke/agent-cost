@@ -36,9 +36,9 @@ def _fact(model_key, token_kind, tokens, occurred_at="2026-09-05T00:00:00+00:00"
 
 
 def test_a1_claude_fable_5_1_resolves_with_expected_values_on_or_after_effective_from():
-    # AC1: resolves at/after 2026-08-30T00:00:00+00:00 with the specified values.
+    # AC1: resolves at/after 2026-09-02T01:17:55+00:00 with the specified values.
     catalog = load_rates()
-    for occurred_at in ("2026-08-30T00:00:00+00:00", "2026-12-01T00:00:00+00:00"):
+    for occurred_at in ("2026-09-02T01:17:55+00:00", "2026-12-01T00:00:00+00:00"):
         resolved, period = catalog.rate_for("claude-fable-5-1", dt(occurred_at))
         assert resolved == "claude-fable-5-1"
         assert period is not None
@@ -50,10 +50,10 @@ def test_a1_claude_fable_5_1_resolves_with_expected_values_on_or_after_effective
 
 
 def test_a2_claude_fable_5_1_is_unpriced_before_effective_from_boundary():
-    # AC2: strictly before 2026-08-30T00:00:00+00:00 -> period is None; exact
-    # boundary (00:00:00) is priced (checked in test_a1).
+    # AC2: strictly before 2026-09-02T01:17:55+00:00 -> period is None; exact
+    # boundary (01:17:55) is priced (checked in test_a1).
     catalog = load_rates()
-    resolved, before = catalog.rate_for("claude-fable-5-1", dt("2026-08-29T23:59:59+00:00"))
+    resolved, before = catalog.rate_for("claude-fable-5-1", dt("2026-09-02T01:17:54+00:00"))
     assert resolved == "claude-fable-5-1"
     assert before is None
 
@@ -86,7 +86,7 @@ def test_a3_claude_fable_5_1_cache_write_kinds_price_as_expected():
 
 def test_a4_claude_fable_5_without_suffix_is_unaffected():
     # AC4: claude-fable-5 (no "-1" suffix) keeps cache_read == 1.00, both
-    # before and after 2026-08-30 -- confirms E0-a did not touch this entry.
+    # before and after 2026-09-02 -- confirms E0-a did not touch this entry.
     catalog = load_rates()
     for occurred_at in ("2026-07-01T00:00:00+00:00", "2026-09-01T00:00:00+00:00"):
         resolved, period = catalog.rate_for("claude-fable-5", dt(occurred_at))
