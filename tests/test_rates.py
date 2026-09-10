@@ -40,15 +40,17 @@ def test_sonnet_5_price_is_unchanged_across_the_2026_09_01_boundary():
     # never took effect (platform.claude.com/docs/en/about-claude/pricing, note
     # claude-sonnet-5-introductory-pricing, retrieved 2026-09-09): "The $2/$10 ...
     # is now the standard price. The previously scheduled increase to $3/$15 ...
-    # will not occur." The launch-promo period was extended to effective_until=null
-    # rather than switching to a separate (and higher) "standard" period.
+    # will not occur." claude-sonnet-5-launch-promo (through 2026-09-01) is
+    # followed by claude-sonnet-5-standard-2026-09-01 (from 2026-09-01, open
+    # ended), a distinct rate_id but with the identical $2/$10 table, so the
+    # price stays continuous across the boundary even though the period
+    # identity changes there.
     catalog = load_rates()
     _, promo = catalog.rate_for("claude-sonnet-5", dt("2026-08-31T23:00:00+00:00"))
     assert promo.values["input_nocache"] == Decimal("2.0")
 
     _, at_boundary = catalog.rate_for("claude-sonnet-5", dt("2026-09-01T00:00:00+00:00"))
-    assert at_boundary.values["input_nocache"] == Decimal("2.0")
-    assert at_boundary.rate_id == promo.rate_id
+    assert at_boundary.values == promo.values
 
     _, later = catalog.rate_for("claude-sonnet-5", dt("2026-12-01T00:00:00+00:00"))
     assert later.values["input_nocache"] == Decimal("2.0")
