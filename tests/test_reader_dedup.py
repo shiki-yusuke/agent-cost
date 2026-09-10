@@ -829,3 +829,73 @@ def test_non_string_model_dict_duplicate_rows_collapse_to_one_no_conflict():
         assert f.model_raw == {"name": "x"}
         assert f.model_key == expected_key
         assert f.source_quality == "ok"
+
+
+# ---------------------------------------------------------------------------
+# raw ``message.model`` conflict detection (team-lead contract, this round):
+# within one full-pair (message.id, requestId) group, a difference in
+# ``message.model``'s *raw* string must be treated as a genuine conflict
+# even when the two raw strings collapse to the same ``normalize_model_key``
+# result -- conflict detection compares the raw value the transcript
+# actually carried, not the cosmetically-collapsed key used for pricing.
+# Same raw string on every row in the group -> conflict 0 (this direction is
+# already covered above, e.g. test_exact_duplicate_rows_collapse_to_one_...).
+# ---------------------------------------------------------------------------
+
+
+def test_raw_model_string_difference_that_normalizes_equal_is_still_a_conflict():
+    """Spec (team-lead contract, this round): two rows share one full-pair
+    key, identical input-side tokens (input=10) and identical output
+    (output=5), both stop_reason end_turn, but differ in ``message.model``'s
+    *raw* string -- "claude-sonnet-5" on row 1 vs "claude-sonnet-5[1m]" on
+    row 2. The fixture deliberately picks a pair whose raw strings collapse
+    to the *same* ``normalize_model_key`` result (asserted below), to prove
+    conflict detection is keyed off the raw value, not the normalized one:
+    if it compared normalized keys only, this group's dedup-comparable
+    input signature would look identical across both rows (same tokens,
+    same normalized model) and conflicting_duplicate_groups would come out
+    0 -- a broken implementation reusing that normalized-key comparison for
+    conflict purposes would report 0 here instead of 1. The adopted row is
+    still the group's last row (both are end_turn completions, per the B3
+    "last completion wins" rule already covered above), so output stays 5
+    and model_key must equal ``normalize_model_key`` run on the *adopted*
+    row's raw string ("claude-sonnet-5[1m]")."""
+    assert normalize_model_key("claude-sonnet-5") == normalize_model_key("claude-sonnet-5[1m]"), (
+        "fixture precondition: the two raw strings must normalize to the same key, "
+        "so this test actually exercises raw-string comparison, not normalized-key comparison"
+    )
+
+    result = parse_session_detailed(_fixture("raw_model_string_conflict.jsonl"))
+    assert result.malformed_events == 0
+    assert result.conflicting_duplicate_groups == 1
+
+    output_facts = [f for f in result.facts if f.token_kind == "output"]
+    assert len(output_facts) == 1
+    assert output_facts[0].tokens == 5
+
+    expected_key = normalize_model_key("claude-sonnet-5[1m]")
+    for f in result.facts:
+        assert f.model_raw == "claude-sonnet-5[1m]"
+        assert f.model_key == expected_key
+
+
+def test_non_string_model_dict_values_differing_is_a_conflict():
+    """Spec (team-lead contract, this round): two rows share one full-pair
+    key and identical input/output tokens, but carry two *different*
+    non-string (dict) ``message.model`` values ({"name": "a"} vs
+    {"name": "b"}) -- this must be flagged as a conflict
+    (conflicting_duplicate_groups == 1), and must not raise, mirroring the
+    already-covered same-dict-value case
+    (test_non_string_model_dict_duplicate_rows_collapse_to_one_no_conflict)
+    where equal dicts dedup cleanly with zero conflicts. A broken
+    implementation would either raise trying to hash/compare the dicts
+    directly (instead of routing them through the same normalize-then-key
+    machinery used for equality), or silently treat any non-string model as
+    equal to any other and report conflicting_duplicate_groups == 0 here."""
+    result = parse_session_detailed(_fixture("non_string_model_dict_conflict.jsonl"))
+    assert result.malformed_events == 0
+    assert result.conflicting_duplicate_groups == 1
+
+    output_facts = [f for f in result.facts if f.token_kind == "output"]
+    assert len(output_facts) == 1
+    assert output_facts[0].tokens == 3
