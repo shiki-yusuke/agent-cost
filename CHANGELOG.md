@@ -37,13 +37,33 @@ facts from 0.1.x and 0.2.0+ are not directly comparable. See "Fixed" below.
 - `data_quality.duplicate_rows_skipped`, `data_quality.conflicting_duplicate_groups`,
   and `data_quality.missing_dedup_identity_rows` in `report` and `measure`
   JSON output -- diagnostics for the dedup above (how many duplicate lines
-  were collapsed, how many dedup groups disagreed on token counts across
-  their duplicate lines, and how many rows had neither a full `message.id`
-  + `requestId` pair to dedup on at all). All three are scoped to match
-  the rest of that command's output: `report`'s to its `--since`/`--until`
-  window, `measure`'s to its requested `--session-id`s *and* window -- an
-  unrequested session's conflict never affects a requested session's
-  counters.
+  were collapsed, how many dedup groups actually disagreed on billing, and
+  how many rows had neither a full `message.id` + `requestId` pair to dedup
+  on at all). All three are scoped to match the rest of that command's
+  output: `report`'s to its `--since`/`--until` window, `measure`'s to its
+  requested `--session-id`s *and* window -- an unrequested session's
+  conflict never affects a requested session's counters.
+
+  `conflicting_duplicate_groups` does **not** flag ordinary Claude Code
+  streaming: real transcript data shows a full-pair group's input-side
+  fields (`input_tokens`, `cache_read_input_tokens`, the `cache_creation`
+  TTL breakdown) staying identical across every row while `output_tokens`
+  alone grows monotonically as the response streams in, with the final
+  (`stop_reason`-bearing) row carrying the largest value -- that pattern is
+  counted only in `duplicate_rows_skipped`, not as a conflict. `mode` gets
+  the same treatment: a separate check (60 subagent transcripts) found 814
+  groups whose only apparent disagreement was `mode` -- every one caused by
+  `usage.speed` being absent on intermediate streaming rows (reported as
+  `"unknown"`) and present only on the final row. `"unknown"` is therefore
+  a wildcard for conflict purposes: `"unknown"` mixed with a single
+  concrete mode (`"normal"`/`"fast"`) is not a conflict, but two
+  *different* concrete modes are. A group is flagged as conflicting only
+  when an input-side field actually differs across its rows, its concrete
+  modes disagree, or `output_tokens` decreases or is non-monotonic across
+  them (all three are actual billing disagreements, not streaming
+  progress). The emitted fact's `mode` prefers a group's one concrete mode
+  over an adopted row's `"unknown"`, so a fact never reports an
+  unknown mode when the group actually knows it.
 - A new `source_quality` value, `"identity_missing"` (see "Fixed" above),
   alongside the existing `"ok"` and `"first_event_delta"`.
 - `measure`'s JSON output now also carries `producer_version` (the

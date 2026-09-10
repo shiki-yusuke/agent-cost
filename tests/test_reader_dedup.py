@@ -25,11 +25,24 @@ Dedup contract (spec, round 2):
   - ``duplicate_rows_skipped`` = sum over dedup-eligible keys of
     (row_count - 1). Rows counted in missing_dedup_identity_rows are not
     part of this sum.
-  - billing signature = (model, mode, input_nocache, cache_read,
-    cache_write_5m, cache_write_1h, cache_write_unknown, output). Two or
-    more distinct signatures within one key's group increments
-    ``conflicting_duplicate_groups`` by 1 (the adopted row is still
-    emitted, never dropped).
+  - Conflict detection (final contract, confirmed against real data)
+    treats the *input-side* signature -- (model, mode, input_nocache,
+    cache_read, cache_write_5m, cache_write_1h, cache_write_unknown) --
+    separately from ``output_tokens``. A group where the input-side
+    signature is identical across every row AND ``output_tokens`` is
+    non-decreasing row-by-row is normal streaming progression, NOT a
+    conflict. A group IS a conflict iff the input-side signature differs
+    across any two rows, or ``output_tokens`` decreases (is non-monotonic)
+    at any step in row order. The adopted-row rule above is unaffected by
+    this distinction -- it is still evaluated purely from stop_reason and
+    "does a later row disagree" (using this same conflict definition for
+    "disagree").
+  - Within the input-side signature, mode == "unknown" (no usage.speed
+    key -- real streaming's non-final rows) is a wildcard: mixing
+    "unknown" with exactly one concrete mode value is not, by itself, a
+    conflict. Two *concrete* mode values differing (e.g. "fast" vs
+    "normal") is still a conflict. The emitted Fact's mode is always the
+    adopted row's own value.
   - measure's 3 counters in data_quality are summed only over the
     requested session ids within the report window, not globally across
     every fact read from disk.
@@ -102,25 +115,34 @@ def test_exact_duplicate_rows_collapse_to_one_and_are_counted():
 
 
 def test_placeholder_row_is_superseded_and_occurred_at_is_the_adopted_rows():
-    """Spec (round 2): the adopted row is the last non-empty-stop_reason
-    row, and Fact.occurred_at_utc comes from *that adopted row*, not the
-    first row. Here the null-stop_reason placeholder (00:00:00) is
-    superseded by the end_turn row (00:00:05), so occurred_at must be
-    00:00:05. A broken implementation stuck on round-1's "first row"
-    occurred_at rule would report 00:00:00 instead."""
+    """Spec (final): the adopted row is the last non-empty-stop_reason row,
+    and Fact.occurred_at_utc comes from *that adopted row*, not the first
+    row. Here the null-stop_reason placeholder (00:00:00) is superseded
+    by the end_turn row (00:00:05), so occurred_at must be 00:00:05. This
+    fixture's input side is identical across both rows and output is
+    non-decreasing (1 -> 500), which the final conflict contract treats
+    as normal streaming progression -- NOT a conflict. A broken
+    implementation stuck on round-1's "first row" occurred_at rule would
+    report 00:00:00 instead; one still flagging any output_tokens
+    difference as a conflict would report conflicting_duplicate_groups=1
+    here."""
     result = parse_session_detailed(_fixture("placeholder_then_final.jsonl"))
     output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
     assert output_tokens == [500]
-    assert result.conflicting_duplicate_groups == 1
+    assert result.conflicting_duplicate_groups == 0
     assert all(f.occurred_at_utc.isoformat().startswith("2026-06-01T00:00:05") for f in result.facts)
     assert result.duplicate_rows_skipped == 1
 
 
 def test_all_null_stop_reason_falls_back_to_last_row_and_flags_conflict():
     """Spec: when no row in the group has a non-empty stop_reason, the last
-    row's usage is adopted. A broken implementation would keep the first
-    row's usage (output=10) instead of the last (output=20), or fail to
-    flag the conflict since usage genuinely differs."""
+    row's usage is adopted. The two rows here differ on the input side
+    (input_tokens 100 vs 200) with output also increasing (10 -> 20), so
+    under the final conflict contract this is a conflict regardless of
+    output direction (input-side difference alone is sufficient). A
+    broken implementation would keep the first row's usage (output=10)
+    instead of the last (output=20), or fail to flag the conflict since
+    the input side genuinely differs."""
     result = parse_session_detailed(_fixture("all_null_stop_reason_conflict.jsonl"))
     output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
     assert output_tokens == [20]
@@ -216,10 +238,13 @@ def test_a_non_string_or_empty_identities_are_identity_missing_not_a_crash():
 
 
 def test_b1_conflicting_row_after_completion_row_wins_adoption():
-    """Spec item B(i): a non-empty-stop_reason row (output=10) is followed,
-    within the same key, by a null-stop_reason row with a *different*
-    signature (output=20). Because a later row disagrees with the
-    candidate, the adopted row becomes the group's last row regardless of
+    """Spec item B(i): a non-empty-stop_reason row (input=10, output=10) is
+    followed, within the same key, by a null-stop_reason row with a
+    *different input-side signature* (input=20, output=20). Since a
+    same-input/non-decreasing-output pair would NOT be a conflict under
+    the final contract, this fixture deliberately differs on the input
+    side (input_tokens) so the "later row disagrees" rule still applies:
+    the adopted row becomes the group's last row regardless of
     stop_reason -- output must be 20, and conflict must be flagged. A
     broken implementation that always trusts the first non-null
     stop_reason row would report output=10 and might miss the conflict."""
@@ -233,11 +258,14 @@ def test_b2_empty_string_stop_reason_is_not_treated_as_complete():
     """Spec item B(ii): stop_reason == "" (empty string) must not count as
     a completed row. With every row in the group at stop_reason="", there
     is no adoption candidate, so the group falls back to the last row --
-    same rule as the all-null case. A broken implementation treating ""
-    as a valid non-empty stop_reason would still land on the last row
-    here (it's also the group's last completion), so the binding check is
-    conflict detection: a false "no conflict" would mean the two rows'
-    differing usage was never compared at all."""
+    same rule as the all-null case. The two rows also differ on the input
+    side (input=10 vs 20, deliberately, so this stays a conflict under
+    the final contract regardless of output direction) -- a broken
+    implementation treating "" as a valid non-empty stop_reason would
+    still land on the last row here (it's also the group's last
+    completion) by coincidence, so the binding check is conflict
+    detection: a false "no conflict" would mean the two rows' differing
+    usage was never compared at all."""
     result = parse_session_detailed(_fixture("stop_reason_empty_string_not_complete.jsonl"))
     output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
     assert output_tokens == [20]
@@ -245,12 +273,15 @@ def test_b2_empty_string_stop_reason_is_not_treated_as_complete():
 
 
 def test_b3_multiple_completion_rows_with_differing_signature_last_completion_wins():
-    """Spec item B(iii): two rows both have a non-empty stop_reason but
-    different signatures, and the candidate (last non-empty-stop_reason
-    row) is also the group's last row -- so no "later disagreeing row"
-    exists to override it. The adopted row must be that last completion
-    row (output=20) per the plain candidate rule. A broken implementation
-    might instead prefer the first completion row (output=10)."""
+    """Spec item B(iii): two rows both have a non-empty stop_reason but a
+    different *input-side signature* (input=10 vs 20; output also
+    increases 10 -> 20, which alone would not be a conflict, so the input
+    difference is what makes this a conflict), and the candidate (last
+    non-empty-stop_reason row) is also the group's last row -- so no
+    "later disagreeing row" exists to override it. The adopted row must
+    be that last completion row (output=20) per the plain candidate rule.
+    A broken implementation might instead prefer the first completion row
+    (output=10), or fail to flag the conflict by only comparing output."""
     result = parse_session_detailed(_fixture("multiple_completions_conflict.jsonl"))
     output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
     assert output_tokens == [20]
@@ -258,10 +289,15 @@ def test_b3_multiple_completion_rows_with_differing_signature_last_completion_wi
 
 
 # ---------------------------------------------------------------------------
-# Billing signature dimensions (round 2 item C)
+# Billing signature dimensions (round 2 item C; conflict rule finalized
+# against real data -- see the module docstring's "Conflict detection"
+# bullet). Only the 7 *input-side* dimensions unconditionally trigger a
+# conflict when changed alone; output_tokens is judged by direction
+# (non-decreasing = no conflict, decreasing = conflict), not by mere
+# difference, so it is tested separately below.
 # ---------------------------------------------------------------------------
 
-SIGNATURE_DIMENSION_OVERRIDES = {
+INPUT_SIDE_SIGNATURE_DIMENSION_OVERRIDES = {
     "model": {},  # handled via the model= kwarg instead of a usage override
     "mode": {"speed": "fast"},
     "input_nocache": {"input_tokens": 200},
@@ -278,28 +314,37 @@ SIGNATURE_DIMENSION_OVERRIDES = {
     # 60 - 50 = 10; bumping the total to 70 with the same 5m/1h breakdown
     # changes only the leftover (cache_write_unknown), nothing else.
     "cache_write_unknown": {"cache_creation_input_tokens": 70},
-    "output": {"output_tokens": 80},
 }
 
 
-@pytest.mark.parametrize("dimension", sorted(SIGNATURE_DIMENSION_OVERRIDES))
-def test_c_each_billing_signature_dimension_alone_triggers_conflict(tmp_path, dimension):
-    """Spec item C: billing signature = (model, mode, input_nocache,
-    cache_read, cache_write_5m, cache_write_1h, cache_write_unknown,
-    output). Changing exactly one of these 8 dimensions between two
-    otherwise-identical duplicate rows must be detected as a conflict
-    (>= 2 distinct signatures) and must still collapse to 1 duplicate
-    skipped. A broken implementation comparing only a subset of these
-    fields (e.g. omitting mode, or computing cache_write_unknown wrong)
-    would report conflicting_duplicate_groups == 0 for that one
-    dimension."""
+@pytest.mark.parametrize("dimension", sorted(INPUT_SIDE_SIGNATURE_DIMENSION_OVERRIDES))
+def test_c_each_input_side_signature_dimension_alone_triggers_conflict(tmp_path, dimension):
+    """Spec item C (final): the input-side signature is (model, mode,
+    input_nocache, cache_read, cache_write_5m, cache_write_1h,
+    cache_write_unknown). output_tokens is held constant (non-decreasing,
+    trivially, since it's unchanged) across both rows here, so any
+    conflict reported must come from the one input-side dimension changed
+    -- proving each of these 7 dimensions is actually compared. The mode
+    dimension is special-cased to start both rows from a *concrete* mode
+    ("normal") rather than the default "unknown": mode's "unknown" (no
+    usage.speed key) is a wildcard for conflict purposes (see the
+    dedicated wildcard tests below), so an unknown-vs-"fast" pair would
+    NOT conflict and would falsely pass this dimension. Using two
+    concrete values ("normal" vs "fast") proves the dimension is actually
+    compared. A broken implementation comparing only a subset of these
+    fields (e.g. omitting mode, or computing cache_write_unknown's
+    leftover wrong) would report conflicting_duplicate_groups == 0 for
+    that one dimension."""
     base_usage = _sig_usage()
     changed_usage = _sig_usage()
     model = "claude-opus-4-8"
     if dimension == "model":
         model = "claude-sonnet-5"
+    elif dimension == "mode":
+        base_usage["speed"] = "normal"
+        changed_usage.update(INPUT_SIDE_SIGNATURE_DIMENSION_OVERRIDES[dimension])
     else:
-        changed_usage.update(SIGNATURE_DIMENSION_OVERRIDES[dimension])
+        changed_usage.update(INPUT_SIDE_SIGNATURE_DIMENSION_OVERRIDES[dimension])
 
     events = [
         _sig_event("2026-06-01T00:00:00Z", base_usage),
@@ -311,6 +356,108 @@ def test_c_each_billing_signature_dimension_alone_triggers_conflict(tmp_path, di
     result = parse_session_detailed(path)
     assert result.conflicting_duplicate_groups == 1, dimension
     assert result.duplicate_rows_skipped == 1, dimension
+
+
+# ---------------------------------------------------------------------------
+# mode "unknown" wildcard (final review, confirmed against real data:
+# streaming's non-final rows carry no usage.speed at all, so mode ==
+# "unknown" there must not spuriously conflict with the final row's
+# concrete mode)
+# ---------------------------------------------------------------------------
+
+
+def test_mode_unknown_is_a_wildcard_not_a_conflict():
+    """Spec (mode wildcard, final): mode == "unknown" (no usage.speed key,
+    matching real streaming's non-final rows) is a wildcard for conflict
+    purposes -- a group mixing "unknown" with exactly one concrete mode
+    value ("normal") is NOT a conflict, even though the two rows'
+    signatures differ in that field. The emitted Fact's mode is the
+    adopted row's concrete value ("normal"), never "unknown". A broken
+    implementation treating "unknown" as just another distinct mode value
+    would flag conflicting_duplicate_groups == 1 here."""
+    result = parse_session_detailed(_fixture("mode_unknown_wildcard_no_conflict.jsonl"))
+    assert result.conflicting_duplicate_groups == 0
+    output_facts = [f for f in result.facts if f.token_kind == "output"]
+    assert len(output_facts) == 1
+    assert output_facts[0].tokens == 50
+    assert all(f.mode == "normal" for f in result.facts)
+
+
+def test_mode_concrete_values_differing_is_a_conflict():
+    """Spec (mode wildcard, final): the "unknown" wildcard exemption only
+    covers "unknown" itself -- two rows with two *different concrete*
+    mode values ("fast" vs "normal"), with token counts and stop_reason
+    otherwise identical/completed, is a genuine conflict. The adopted row
+    is still the group's last row (mode "normal"). A broken
+    implementation that widened the wildcard exemption to any mode
+    mismatch (not just "unknown") would report
+    conflicting_duplicate_groups == 0 here."""
+    result = parse_session_detailed(_fixture("mode_concrete_values_differ_conflict.jsonl"))
+    assert result.conflicting_duplicate_groups == 1
+    assert all(f.mode == "normal" for f in result.facts)
+
+
+def test_c_output_increase_with_identical_input_side_is_not_a_conflict(tmp_path):
+    """Spec item C (final): with the input-side signature identical across
+    both rows, a non-decreasing output_tokens change (40 -> 80) is normal
+    streaming progression, not a conflict. A broken implementation still
+    treating any output_tokens difference as a distinct signature would
+    report conflicting_duplicate_groups == 1 here."""
+    base_usage = _sig_usage()
+    increased_usage = _sig_usage(output_tokens=80)
+
+    events = [
+        _sig_event("2026-06-01T00:00:00Z", base_usage),
+        _sig_event("2026-06-01T00:00:05Z", increased_usage),
+    ]
+    path = tmp_path / "sig_output_increase.jsonl"
+    _write_jsonl(path, events)
+
+    result = parse_session_detailed(path)
+    assert result.conflicting_duplicate_groups == 0
+    output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
+    assert output_tokens == [80]
+
+
+def test_c_output_decrease_with_identical_input_side_is_a_conflict(tmp_path):
+    """Spec item C (final): with the input-side signature identical, a
+    *decreasing* output_tokens change (40 -> 10) is not normal streaming
+    progression and must be flagged as a conflict, even though nothing on
+    the input side differs. A broken implementation that only compares
+    input-side fields (never checking output monotonicity) would report
+    conflicting_duplicate_groups == 0 here."""
+    base_usage = _sig_usage()
+    decreased_usage = _sig_usage(output_tokens=10)
+
+    events = [
+        _sig_event("2026-06-01T00:00:00Z", base_usage),
+        _sig_event("2026-06-01T00:00:05Z", decreased_usage),
+    ]
+    path = tmp_path / "sig_output_decrease.jsonl"
+    _write_jsonl(path, events)
+
+    result = parse_session_detailed(path)
+    assert result.conflicting_duplicate_groups == 1
+    output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
+    assert output_tokens == [10]
+
+
+def test_output_non_monotonic_across_three_rows_is_a_conflict_last_row_adopted():
+    """Spec (final): output monotonicity is checked across the full row
+    sequence in order, not just first-vs-last -- 5 -> 20 -> 15 has a
+    decrease at the last step even though input-side signature never
+    changes and the first-to-last direction (5 -> 15) is an increase, so
+    this must be flagged as a conflict. The adopted row remains the
+    group's last row (output=15) per the ordinary candidate rule (all
+    three rows are end_turn, so the last is the candidate, and there is
+    no later row to override it). A broken implementation checking only
+    the endpoints (5 vs 15) or only consecutive-pair sums would miss the
+    dip and report no conflict."""
+    result = parse_session_detailed(_fixture("non_monotonic_output_three_rows.jsonl"))
+    output_tokens = [f.tokens for f in result.facts if f.token_kind == "output"]
+    assert output_tokens == [15]
+    assert result.conflicting_duplicate_groups == 1
+    assert result.duplicate_rows_skipped == 2
 
 
 # ---------------------------------------------------------------------------
@@ -484,7 +631,9 @@ def test_e_measure_dedup_counters_do_not_leak_across_unrequested_sessions(tmp_pa
     """Spec item E: the 3 dedup counters in measure's data_quality must be
     scoped to the *requested* session id(s), not summed globally over
     every fact read from disk. A fixture has a clean "requested" session
-    and a dirty "unrequested" session (1 conflicting duplicate group + 1
+    and a dirty "unrequested" session (1 conflicting duplicate group,
+    made a conflict via an input-side difference so it stays a conflict
+    under the final contract regardless of output direction, + 1
     identity-missing row). Querying --session-id requested must report
     all 3 counters as 0; querying --session-id unrequested must report
     them non-zero. A broken implementation reusing the

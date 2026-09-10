@@ -135,29 +135,78 @@ def _valid_id(value) -> Optional[str]:
     return value if isinstance(value, str) and value else None
 
 
-def _usage_signature(model_raw, mode: str, tokens: dict) -> tuple:
-    """A duplicate-comparable fingerprint of what a row would bill.
-
-    Deliberately narrower than the raw ``usage`` dict: two rows that differ
-    only in a non-billing field (e.g. ``iterations``, ``server_tool_use``)
-    must not be flagged as conflicting duplicates. Deliberately excludes
-    timestamp and session id too: the actual rate period a fact prices
-    against is resolved later, from ``occurred_at_utc``
-    (``aggregate.price_fact``), not compared here, and a session-id
-    mismatch within one dedup group would be a different kind of anomaly
-    than a usage conflict, worth a separate diagnostic rather than folding
-    into this one.
+def _input_signature(model_raw, tokens: dict) -> tuple:
+    """A duplicate-comparable fingerprint of a row's *input*-side billing
+    fields only -- ``model`` plus the 5 input-side token amounts.
+    Deliberately excludes ``output`` (see ``parse_session_detailed``'s
+    docstring for why: real Claude Code streaming grows ``output_tokens``
+    monotonically across a group's rows, which is expected and not itself
+    a conflict) and ``mode`` (real streaming's intermediate rows lack
+    ``usage.speed`` entirely -- ``_detect_mode`` reports ``"unknown"`` for
+    them, with only the final row carrying the real mode -- comparing mode
+    here would flag that as a conflict every single time; see
+    ``_mode_conflict`` for the wildcard-aware comparison used instead).
+    Also excludes non-billing ``usage`` fields (e.g. ``iterations``,
+    ``server_tool_use``), timestamp and session id -- the actual rate
+    period a fact prices against is resolved later from
+    ``occurred_at_utc`` (``aggregate.price_fact``), not compared here, and
+    a session-id mismatch within one dedup group would be a different
+    kind of anomaly than a usage conflict, worth a separate diagnostic
+    rather than folding into this one.
     """
     return (
         model_raw,
-        mode,
         tokens.get("input_nocache", 0),
         tokens.get("cache_read", 0),
         tokens.get("cache_write_5m", 0),
         tokens.get("cache_write_1h", 0),
         tokens.get("cache_write_unknown", 0),
-        tokens.get("output", 0),
     )
+
+
+def _mode_conflict(mode_a: str, mode_b: str) -> bool:
+    """Whether two rows' ``mode`` values actually disagree.
+
+    ``"unknown"`` is a wildcard, not a value of its own: real Claude Code
+    streaming leaves ``usage.speed`` off every row but the last (see
+    ``_input_signature``), so ``"unknown"`` paired with any single concrete
+    mode (``"normal"``/``"fast"``) is not a conflict -- only two *different*
+    concrete modes are.
+    """
+    return mode_a != "unknown" and mode_b != "unknown" and mode_a != mode_b
+
+
+def _rows_differ(row_a: dict, row_b: dict) -> bool:
+    """Whether two rows disagree on anything that would change what gets
+    billed: the 6-field input signature (model + 5 input-side token
+    amounts), mode (wildcard-aware, see ``_mode_conflict``), or output.
+    Used by ``_select_adopted_row``'s override check.
+    """
+    if _input_signature(row_a["model_raw"], row_a["tokens"]) != _input_signature(row_b["model_raw"], row_b["tokens"]):
+        return True
+    if _mode_conflict(row_a["mode"], row_b["mode"]):
+        return True
+    return row_a["tokens"].get("output", 0) != row_b["tokens"].get("output", 0)
+
+
+def _resolve_mode(rows: list, adopted: dict) -> str:
+    """The mode to emit on a dedup group's fact(s).
+
+    Normally the adopted row's own mode. But if the adopted row's mode is
+    the ``"unknown"`` wildcard (its ``usage.speed`` was absent -- typical
+    of an intermediate streaming row that ended up adopted via
+    ``_select_adopted_row``'s override) and the group has exactly one
+    concrete mode elsewhere, that concrete mode is the real answer and is
+    used instead of reporting a knowable mode as unknown. If the group's
+    concrete modes disagree (already flagged as a conflict) or there are
+    none, the adopted row's own mode is used as-is.
+    """
+    if adopted["mode"] != "unknown":
+        return adopted["mode"]
+    concrete_modes = {r["mode"] for r in rows if r["mode"] != "unknown"}
+    if len(concrete_modes) == 1:
+        return next(iter(concrete_modes))
+    return adopted["mode"]
 
 
 def _select_adopted_row(rows: list) -> dict:
@@ -168,8 +217,8 @@ def _select_adopted_row(rows: list) -> dict:
     values all fail to qualify -- only a real stop-reason string counts as
     "complete"). Falls back to the group's last row if none qualifies.
 
-    Override: if any row *after* that primary pick has a different usage
-    signature, the group's actual last row is adopted instead. A
+    Override: if any row *after* that primary pick differs from it (see
+    ``_rows_differ``), the group's actual last row is adopted instead. A
     "complete" row followed by a further, differently-valued row is not
     something Claude Code is documented to do, but if it happens the most
     recently observed state should win over an earlier "complete" marker
@@ -187,15 +236,12 @@ def _select_adopted_row(rows: list) -> dict:
     if adopted_idx is None:
         return rows[-1]
 
-    adopted_signature = _usage_signature(
-        rows[adopted_idx]["model_raw"], rows[adopted_idx]["mode"], rows[adopted_idx]["tokens"]
-    )
+    adopted_row = rows[adopted_idx]
     for later_row in rows[adopted_idx + 1 :]:
-        later_signature = _usage_signature(later_row["model_raw"], later_row["mode"], later_row["tokens"])
-        if later_signature != adopted_signature:
+        if _rows_differ(adopted_row, later_row):
             return rows[-1]
 
-    return rows[adopted_idx]
+    return adopted_row
 
 
 def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
@@ -231,11 +277,39 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
     boundary that they don't actually belong to. Only the group's
     *position* in the output ``facts`` list follows first-seen order, so a
     later-arriving duplicate of an earlier message doesn't reorder it past
-    messages that came after it in the original transcript. If the group's
-    rows don't all share the same usage signature (model/mode/token
-    counts), ``conflicting_duplicate_groups`` counts it -- the adopted row
-    is still emitted, never dropped, since silently discarding a differing
-    usage would just trade over-counting for under-counting.
+    messages that came after it in the original transcript.
+
+    A group is flagged in ``conflicting_duplicate_groups`` unless it looks
+    like ordinary Claude Code streaming: real transcript data (415
+    subagent sessions, 14,624 full-pair groups) shows every row in a group
+    sharing identical input-side fields (``input_tokens``,
+    ``cache_read_input_tokens``, the ``cache_creation`` TTL breakdown) while
+    ``output_tokens`` alone grows monotonically line-by-line as the
+    response streams in, non-decreasing across the group's rows in file
+    order, with the final (``stop_reason``-bearing) row carrying the
+    largest value -- 0 of those 14,624 groups disagreed on an input field.
+    A separate real-data check (60 more subagent transcripts, 2026-09-10)
+    found 814 groups the *input*-only rule above would still miss: every
+    one of those 814 was a ``mode`` mismatch caused by ``usage.speed``
+    being absent on intermediate streaming rows (``_detect_mode`` reports
+    ``"unknown"``) and present only on the final row (a concrete mode) --
+    not a real billing disagreement. So a group is **not** a conflict when
+    (a) ``_input_signature`` (model + the 5 input-side token amounts) is
+    identical across every row, (b) the group's mode values don't actually
+    disagree (``"unknown"`` is a wildcard -- see ``_mode_conflict`` --
+    so ``"unknown"`` mixed with one concrete mode is fine; two *different*
+    concrete modes is not), and (c) ``output`` is non-decreasing from row
+    to row in file order; growing output alone, and an unknown-then-known
+    mode, are both expected streaming progression, not a billing
+    disagreement. Anything else -- an input field that differs, two
+    disagreeing concrete modes, or an output value that decreases/is
+    non-monotonic -- **is** a conflict. Either way the adopted row is
+    still emitted, never dropped, since silently discarding a differing
+    usage would just trade over-counting for under-counting. The emitted
+    fact's ``mode`` is resolved by ``_resolve_mode`` (see its docstring)
+    rather than blindly taken from the adopted row, so an adopted row that
+    happens to be an "unknown"-mode intermediate row doesn't report a
+    knowable mode as unknown.
 
     Raises ``OSError`` if the file cannot be read at all (the caller counts
     that as a skipped file, distinct from a malformed *line*).
@@ -334,8 +408,22 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
 
             adopted = _select_adopted_row(rows)
 
-            signatures = {_usage_signature(r["model_raw"], r["mode"], r["tokens"]) for r in rows}
-            group_conflicting = len(signatures) > 1
+            # Not a conflict when the group looks like ordinary Claude Code
+            # streaming: every row's input-side fields identical, mode
+            # values don't actually disagree ("unknown" is a wildcard --
+            # see _mode_conflict), and output is growing (or staying
+            # equal) row by row in file order -- see this function's
+            # docstring for the real-data basis.
+            input_signatures = {_input_signature(r["model_raw"], r["tokens"]) for r in rows}
+            concrete_modes = {r["mode"] for r in rows if r["mode"] != "unknown"}
+            output_non_decreasing = all(
+                rows[i]["tokens"].get("output", 0) <= rows[i + 1]["tokens"].get("output", 0)
+                for i in range(len(rows) - 1)
+            )
+            is_streaming_progression = (
+                len(input_signatures) == 1 and len(concrete_modes) <= 1 and output_non_decreasing
+            )
+            group_conflicting = not is_streaming_progression
             if group_conflicting:
                 conflicting_duplicate_groups += 1
 
@@ -352,7 +440,7 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
             row = {
                 "occurred_at": adopted["occurred_at"],
                 "model_raw": adopted["model_raw"],
-                "mode": adopted["mode"],
+                "mode": _resolve_mode(rows, adopted),
                 "sid": adopted["sid"],
                 "tokens": adopted["tokens"],
             }

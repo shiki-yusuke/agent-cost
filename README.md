@@ -188,7 +188,18 @@ network, never calls `gh`, and never resolves branches or PRs.
   on its own (never merged) and flagged `source_quality: "identity_missing"`
   rather than assumed billing-accurate. `identity_missing` facts are still
   priced and included in rows/totals; the flag is a warning, not an
-  exclusion or an unpriced status. See `CHANGELOG.md`'s 0.2.0 entry.
+  exclusion or an unpriced status. Within a deduplicated group, an
+  input-side field (input tokens, cache read, cache-write TTL breakdown)
+  that actually differs across the group's rows, two rows disagreeing on
+  a *concrete* mode (`"normal"` vs `"fast"`), or an `output_tokens` value
+  that decreases or is non-monotonic across them, is counted in
+  `data_quality.conflicting_duplicate_groups` as a real billing
+  disagreement -- `output_tokens` alone growing row by row, and a mode of
+  `"unknown"` (absent `usage.speed`, typical of an intermediate streaming
+  row) mixed with a single concrete mode elsewhere in the group, are both
+  ordinary Claude Code streaming and are not flagged, since the reader's
+  own cross-check of real transcripts found exactly those two patterns in
+  every observed duplicated group. See `CHANGELOG.md`'s 0.2.0 entry.
   When Anthropic's prompt-cache TTL breakdown (5-minute vs 1-hour writes) is
   present in the log, it's used; otherwise the cache-write tokens are priced
   at the 5-minute rate as an explicit **lower bound** and flagged
