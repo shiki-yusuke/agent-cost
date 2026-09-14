@@ -316,6 +316,8 @@ agent-cost measure --session-id <id> [--session-id <id> ...] \
 ```json
 {
   "protocol_version": "measure/v1",
+  "producer_version": "0.2.0",
+  "accounting_basis": "agent-cost-raw-total/v2",
   "generated_at": "...",
   "window": { "since": "...", "until": null },
   "timezone": "UTC",
@@ -332,7 +334,10 @@ agent-cost measure --session-id <id> [--session-id <id> ...] \
     "skipped_files": 0,
     "negative_deltas": 0,
     "unpriced_tokens": 0,
-    "source_quality": { "ok": 41, "first_event_delta": 2 }
+    "duplicate_rows_skipped": 0,
+    "conflicting_duplicate_groups": 0,
+    "missing_dedup_identity_rows": 0,
+    "source_quality": { "ok": 41, "first_event_delta": 2, "identity_missing": 0 }
   }
 }
 ```
@@ -341,10 +346,21 @@ Rows are grouped by agent/model/token-kind only -- `measure` never buckets
 by month, since a query is already scoped to specific sessions. `total` is
 the union of every requested `session_id` (not a global report), so it's
 the number to attribute to whatever unit of work those sessions represent.
+`producer_version` is the agent-cost package version that produced this
+payload; `accounting_basis` identifies the token-accounting semantics
+behind the numbers (separate from `protocol_version`, which only tracks
+the JSON shape) -- a consumer that persists historical measurements should
+key comparability on `accounting_basis`, not `producer_version` alone,
+since a future release can bump the latter while keeping the former.
 `data_quality.unpriced_tokens` and `.source_quality` are scoped to the
-requested sessions; `.malformed_events`/`.skipped_files`/`.negative_deltas`
-describe the health of the underlying log read within `--since`/`--until`
-and are not attributable to one session.
+requested sessions; so are the three dedup counters
+(`duplicate_rows_skipped`, `conflicting_duplicate_groups`,
+`missing_dedup_identity_rows`), which are Claude-only and computed over
+the intersection of the requested session ids and the `--since`/`--until`
+window, never over an unrequested session's rows.
+`.malformed_events`/`.skipped_files`/`.negative_deltas` describe the
+health of the underlying log read within `--since`/`--until` and are not
+attributable to one session.
 
 ## Privacy
 

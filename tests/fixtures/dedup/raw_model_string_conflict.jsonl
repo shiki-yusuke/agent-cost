@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-06-01T00:00:00Z","sessionId":"s-rmc","requestId":"req-rmc","message":{"id":"msg-rmc","model":"claude-sonnet-5","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}}
+{"type":"assistant","timestamp":"2026-06-01T00:00:05Z","sessionId":"s-rmc","requestId":"req-rmc","message":{"id":"msg-rmc","model":"claude-sonnet-5[1m]","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}}

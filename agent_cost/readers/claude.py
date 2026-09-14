@@ -158,22 +158,51 @@ def _input_signature(model_raw, tokens: dict) -> tuple:
     kind of anomaly than a usage conflict, worth a separate diagnostic
     rather than folding into this one.
 
-    ``model_raw`` is run through ``normalize_model_key`` before going into
-    the tuple -- not to normalize away cosmetic variants (this signature
-    only feeds equality/hashing within one dedup group, never pricing),
-    but because a malformed transcript could carry a list/dict there, and
-    a tuple with an unhashable element can't go into the ``set`` built in
-    ``parse_session_detailed``; ``normalize_model_key`` always returns a
-    plain, hashable ``str``.
+    ``model_raw`` goes into the tuple via ``_hashable_model_key``, not
+    ``normalize_model_key`` -- see that helper's docstring for why: this
+    signature must keep raw models that differ only in a cosmetic suffix
+    (``-latest``, ``-fast``, ``[1m]``) apart, since the contract is "a
+    model difference is a conflict" and ``normalize_model_key`` would
+    collapse exactly those differences away. Emitted ``Fact.model_raw`` /
+    ``Fact.model_key`` are untouched by this -- they still come from
+    ``normalize_model_key`` where the ``Fact`` is built (see below); this
+    tuple is purely an internal dedup-comparison key.
     """
     return (
-        normalize_model_key(model_raw),
+        _hashable_model_key(model_raw),
         tokens.get("input_nocache", 0),
         tokens.get("cache_read", 0),
         tokens.get("cache_write_5m", 0),
         tokens.get("cache_write_1h", 0),
         tokens.get("cache_write_unknown", 0),
     )
+
+
+def _hashable_model_key(model_raw):
+    """Canonical, hashable serialization of ``model_raw`` for
+    ``_input_signature``'s tuple -- deliberately *not* normalization.
+
+    A ``str`` is returned as-is, byte-for-byte, suffix and all: two raw
+    model strings that differ only in a cosmetic suffix (``-latest``,
+    ``-fast``, ``[1m]``) must produce different signatures here, so a
+    genuine model difference between two rows is never silently folded
+    into one dedup-group entry -- this signature backs both
+    ``conflicting_duplicate_groups`` classification's ``input_signatures``
+    set (``parse_session_detailed``) and ``_rows_differ``'s adoption
+    override check, and normalizing here would make both blind to the
+    difference.
+
+    A non-``str`` ``model_raw`` (a malformed transcript can carry a
+    list/dict on ``message.model``) is serialized via
+    ``json.dumps(value, sort_keys=True, separators=(",", ":"),
+    default=str)`` instead: this keeps it hashable (so it can go into the
+    ``set`` built in ``parse_session_detailed``) and keeps two
+    structurally-equal values comparing equal, without going through
+    ``normalize_model_key``'s lossy reduction.
+    """
+    if isinstance(model_raw, str):
+        return model_raw
+    return json.dumps(model_raw, sort_keys=True, separators=(",", ":"), default=str)
 
 
 def _mode_conflict(mode_a: str, mode_b: str) -> bool:
@@ -190,26 +219,33 @@ def _mode_conflict(mode_a: str, mode_b: str) -> bool:
 
 def _rows_differ(row_a: dict, row_b: dict) -> bool:
     """Whether two rows disagree on anything that would change what gets
-    billed. This is the single definition of "differ" shared by both
-    ``conflicting_duplicate_groups`` classification and
-    ``_select_adopted_row``'s override check -- a row "differs" from
+    billed -- used **only** by ``_select_adopted_row``'s override check
+    (which row's usage becomes the emitted fact), *not* for
+    ``conflicting_duplicate_groups`` classification. A row "differs" from
     another when its ``model``, any of its 5 input-side token amounts (via
     ``_input_signature``), or its ``output`` amount is different, or its
     ``mode`` is a *different concrete* mode (``_mode_conflict`` -- two
     modes that are both ``"normal"``/``"fast"`` but unequal).
 
+    Conflict classification is a separate, stricter rule computed directly
+    in ``parse_session_detailed`` (see its docstring): adoption reacts to
+    *any* output difference between the pick and a later row, while
+    conflict classification only flags output that decreases or is
+    non-monotonic across the whole group, since normal streaming grows
+    ``output_tokens`` monotonically and that alone must not be flagged.
+
     ``"unknown"`` mode is deliberately **not** treated as differing from a
-    concrete mode here, for the override just as much as for conflict
-    classification: ``"unknown"`` means ``usage.speed`` was simply absent
-    on that row, not that the row actually ran at some other, different
-    speed -- it is missing information, not a competing value. Real
-    transcript data backs this up for the override specifically: the
-    completing (``stop_reason``-bearing) row is always the group's last
-    row, and an ``"unknown"``-mode row has never been observed *after* a
-    completing row -- the "override to the last row because a later row
-    differs" path is there for determinism against undocumented future
-    transcript shapes, not because a later ``"unknown"``-mode row need be
-    picked over an earlier, complete, concrete-mode row today.
+    concrete mode here, for the override: ``"unknown"`` means
+    ``usage.speed`` was simply absent on that row, not that the row
+    actually ran at some other, different speed -- it is missing
+    information, not a competing value. Real transcript data backs this up
+    for the override specifically: the completing (``stop_reason``-bearing)
+    row is always the group's last row, and an ``"unknown"``-mode row has
+    never been observed *after* a completing row -- the "override to the
+    last row because a later row differs" path is there for determinism
+    against undocumented future transcript shapes, not because a later
+    ``"unknown"``-mode row need be picked over an earlier, complete,
+    concrete-mode row today.
     """
     if _input_signature(row_a["model_raw"], row_a["tokens"]) != _input_signature(row_b["model_raw"], row_b["tokens"]):
         return True
