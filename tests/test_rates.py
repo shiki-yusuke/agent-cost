@@ -88,7 +88,7 @@ def test_claude_opus_5_is_priced_with_fast_multiplier_2x():
     catalog = load_rates()
     entry = catalog.models["claude-opus-5"]
     assert entry.fast_multiplier == Decimal("2.0")
-    _, period = catalog.rate_for("claude-opus-5", dt("2026-07-15T00:00:00+00:00"))
+    _, period = catalog.rate_for("claude-opus-5", dt("2026-08-01T00:00:00+00:00"))
     assert period.values["input_nocache"] == Decimal("5.0")
     assert period.values["output"] == Decimal("25.0")
 

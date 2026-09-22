@@ -45,7 +45,7 @@ def test_standard_fast_and_unknown_mode_prices(kind, usd, credits, mode, multipl
 
 def test_catalog_observation_boundary_is_not_backdated():
     catalog = load_rates()
-    assert catalog.catalog_version == "2026-09-09"
+    assert catalog.catalog_version == "2026-09-23"
     entry = catalog.models["gpt-6-astra"]
     assert entry.aliases == ()
     assert entry.rates[0].effective_from == CUTOFF
@@ -149,7 +149,7 @@ def test_measure_reads_isolated_synthetic_astra_with_existing_contract(tmp_path,
     assert cli.main(["measure", "--session-id", "synthetic-astra", "--agent", "codex"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["protocol_version"] == "measure/v1"
-    assert report["rates"]["catalog_version"] == "2026-09-09"
+    assert report["rates"]["catalog_version"] == "2026-09-23"
     assert len(report["rates"]["sha256"]) == 64
     assert report["sessions"]["synthetic-astra"]["totals"]["estimated_cost_usd"] == 122
     assert report["total"]["totals"]["credits"] == 3050

@@ -240,8 +240,7 @@ network, never calls `gh`, and never resolves branches or PRs.
   in the report's `data_quality` block instead of being silently dropped or
   clamped to zero.
 - **Known catalog gaps**, tracked in `agent_cost/rates.json`'s `notes`:
-  `claude-opus-5`'s launch date could not be confirmed from an authoritative
-  source, so its rate period's `effective_from` is a placeholder. `gpt-5.6`
+  `gpt-5.6`
   (Sol/Terra/Luna) credits could not be confirmed from the primary source
   (`help.openai.com`'s Codex rate card returns HTTP 403 to automated
   fetches); the values in the catalog come from several independent
