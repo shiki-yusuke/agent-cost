@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
+
+Catalog-only release: no reader or aggregation logic changes. Reports
+computed with 0.2.0 differ only for `claude-opus-5-5` rows (now priced) and
+for `claude-opus-5` rows dated 2026-07-01..2026-07-23 (now `unpriced`).
 
 ### Added
 
