@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.1
+
+Catalog-only release: no reader or aggregation logic changes. Reports
+computed with 0.2.0 differ only for `claude-opus-5-5` rows (now priced) and
+for `claude-opus-5` rows dated 2026-07-01..2026-07-23 (now `unpriced`).
+
+### Added
+
+- `claude-opus-5-5` rate entry (catalog_version `2026-09-23`): $4 / $0.20 /
+  $5 / $8 / $20 per MTok, fast multiplier 2.0, effective from the public
+  launch date 2026-09-22. Claude Code's 2.1.280 changelog entry makes Opus
+  5.5 the default model, so rows whose raw model ID is `claude-opus-5-5`
+  would otherwise have been reported as `unpriced`. `cache_read` is 0.05x
+  base input for this model (pricing-page footnote), not the standard 0.1x.
+
+### Changed
+
+- `claude-opus-5`'s `effective_from` placeholder (2026-07-01) replaced by the
+  official launch date 2026-07-24 (rate_id `claude-opus-5-launch-2026-07-24`).
+  The earliest local transcript row for the model is 2026-07-28, so no
+  observed event changes from priced to unpriced.
+
 ## 0.2.0
 
 **Breaking for anyone comparing raw numbers across versions**: Claude Code

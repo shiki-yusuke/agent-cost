@@ -19,7 +19,7 @@ architect レビュー (3 巡目) と builder レビューで、既存テスト�
        かつ確定金額が計上されない。境界ちょうどは priced になる。
 
 条件D (PR レビュー3点目・追加分): catalog は
-       catalog_version == "2026-09-09" であり、sources の中に url
+       catalog_version == "2026-09-23"（rates.json の現行値）であり、sources の中に url
        "https://platform.claude.com/docs/en/about-claude/pricing" の
        entry があって、その note に
        "sha256=d79ad28567196bd55dd50e2fd89341b9da9774a45c1d02fcf387078507fd15e0"
@@ -224,7 +224,7 @@ def test_condition_c_claude_fable_5_1_at_effective_from_boundary_is_priced_contr
 
 
 def test_condition_d_catalog_version_and_pricing_source_sha256_note():
-    """条件D: catalog_version == "2026-09-09" であり、sources に url
+    """条件D: catalog_version == "2026-09-23"（rates.json の現行値）であり、sources に url
     "https://platform.claude.com/docs/en/about-claude/pricing" の entry が
     あって、その note に指定の sha256 文字列を含むこと。
 
@@ -233,7 +233,7 @@ def test_condition_d_catalog_version_and_pricing_source_sha256_note():
     ダイジェストを貼り付けてしまう。
     """
     catalog = load_rates()
-    assert catalog.catalog_version == "2026-09-09"
+    assert catalog.catalog_version == "2026-09-23"
 
     matches = [
         s

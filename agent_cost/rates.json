@@ -1,16 +1,17 @@
 {
   "schema_version": "1",
-  "catalog_version": "2026-09-09",
+  "catalog_version": "2026-09-23",
   "currency": "USD",
   "unit": "per_mtok",
   "usd_per_credit": "0.04",
   "notes": [
     "All Claude rates are standard (non-batch, non-priority) API prices. Batch API is roughly 50% off, but agent-cost's logs have no signal for whether a given request went through Batch, so batch usage is priced at standard rates and will overstate cost for anyone using Batch.",
-    "claude-opus-5's launch date could not be confirmed from an authoritative source as of this catalog_version; its rate period's effective_from (2026-07-01) is a placeholder -- update it once confirmed.",
+    "claude-opus-5 effective_from corrected 2026-09-23: the 2026-07-01 placeholder (rate_id claude-opus-5-launch-date-unconfirmed) is replaced by the official launch date 2026-07-24 (anthropic.com/news/claude-opus-5, dated 'Jul 24, 2026'), rate_id claude-opus-5-launch-2026-07-24 -- the period is replaced rather than edited in place, following the claude-sonnet-5-standard -> claude-sonnet-5-standard-2026-09-01 correction precedent (rate_id is not consumed by any reader or report field; reports pin catalog_version + sha256). The source gives a calendar date only, so effective_from is 00:00:00Z of that day: a transcript row carrying this model ID cannot predate the public launch, so nothing on the launch day is mispriced by the earlier-of-day boundary. The earliest claude-opus-5 row across local transcripts is 2026-07-28T18:22:52Z, so no locally observed event moves from priced to unpriced; events between 2026-07-01 and 2026-07-23 that were priced under the placeholder are now unpriced, which is the correct treatment for a model that did not exist yet.",
     "gpt-5.6 (sol/terra/luna) credits could not be confirmed from the primary source (help.openai.com's Codex rate card returned HTTP 403 to automated fetches). The values here were cross-checked across several independent secondary sources that agreed with each other and are internally consistent (Sol's $5/$30 per-MTok API price x 25 = 125/750 credits, matching usd_per_credit=0.04); see the gpt-5.6-* sources entries below. Treat effective_from (2026-07-01) as a placeholder and re-verify against the primary rate card when it becomes reachable.",
     "gpt-6-astra: Codex standard token-based rates only; not API pricing, legacy message metering, or actual contractual charges. Confirmed 2026-09-06 JST (2026-09-05T17:18:23Z). effective_from is this observation cutoff, NOT an official launch or price-start time; earlier events remain unpriced. No Codex long-context surcharge or cache-write charge is applied. Fast multiplier 2.5 applies to explicit priority request settings with matching owned turn/model context; explicit default uses Standard. Missing or ambiguous Astra modes remain unpriced. These settings do not confirm the backend processing tier. See docs/astra-pricing.md for compatibility limits and the separate GPT-5.6 discrepancy report.",
     "claude-fable-5-1 added 2026-09-09: rate_id claude-fable-5-1-local-first-observed-2026-09-02. effective_from (2026-09-02T01:17:55Z) is the timestamp the raw model ID was first observed across all 54 local transcript files (none found in August), not a confirmed official launch date -- if an authoritative launch date is confirmed later, add it as a separate rate_id with effective_until on this one rather than editing this period in place. Values (cache_read $0.25/MTok = 0.025x base input) differ from claude-fable-5's cache_read ($1.00/MTok = 0.1x); this is a genuine per-model price difference confirmed against the primary source (see sources below), not an inconsistency to reconcile.",
-    "claude-sonnet-5 corrected 2026-09-09: a prior period (rate_id claude-sonnet-5-standard, effective_from 2026-09-01, values 3.0/0.30/3.75/6.0/15.0) priced a previously-announced rate increase that the pricing page's claude-sonnet-5-introductory-pricing note states did not occur (\"The previously scheduled increase to $3/$15 ... on September 1, 2026 will not occur\"). That period has been replaced by claude-sonnet-5-standard-2026-09-01, which carries the same $2/$0.20/$2.50/$4/$10 values as the preceding claude-sonnet-5-launch-promo period, since the launch price is confirmed to be the ongoing price with no change at the 2026-09-01 boundary. Any measure/v1 or report output computed against the pre-correction catalog for claude-sonnet-5 sessions occurring on or after 2026-09-01 overstated cost by 1.5x for that model. To detect this class of error going forward, cross-check each priced model's rate periods against its primary pricing page's Note text on a recurring (e.g. monthly) basis for mentions of a rate-change announcement being withdrawn or not taking effect -- a period can be internally valid (schema-wise) and still price a rate that was announced but never actually charged."
+    "claude-sonnet-5 corrected 2026-09-09: a prior period (rate_id claude-sonnet-5-standard, effective_from 2026-09-01, values 3.0/0.30/3.75/6.0/15.0) priced a previously-announced rate increase that the pricing page's claude-sonnet-5-introductory-pricing note states did not occur (\"The previously scheduled increase to $3/$15 ... on September 1, 2026 will not occur\"). That period has been replaced by claude-sonnet-5-standard-2026-09-01, which carries the same $2/$0.20/$2.50/$4/$10 values as the preceding claude-sonnet-5-launch-promo period, since the launch price is confirmed to be the ongoing price with no change at the 2026-09-01 boundary. Any measure/v1 or report output computed against the pre-correction catalog for claude-sonnet-5 sessions occurring on or after 2026-09-01 overstated cost by 1.5x for that model. To detect this class of error going forward, cross-check each priced model's rate periods against its primary pricing page's Note text on a recurring (e.g. monthly) basis for mentions of a rate-change announcement being withdrawn or not taking effect -- a period can be internally valid (schema-wise) and still price a rate that was announced but never actually charged.",
+    "claude-opus-5-5 added 2026-09-23: rate_id claude-opus-5-5-launch-2026-09-22. effective_from 2026-09-22T00:00:00Z is 00:00:00Z of the official public launch date (anthropic.com/claude-opus-5-5, 'September 22, 2026'); the launch time of day is not published, but a transcript row whose raw model ID is claude-opus-5-5 cannot predate the launch, so pricing from the start of that UTC day cannot price a pre-launch event. Values 4.0/0.20/5.0/8.0/20.0 per the pricing page: cache_read is 0.05x base input (pricing-page footnote 2), a genuine per-model difference from the standard 0.1x and from claude-fable-5-1's 0.025x. fast_multiplier 2.0 (fast mode $8/$40 per MTok on the pricing page). Claude Code's CHANGELOG entry for 2.1.280 states Opus 5.5 became the default model (see sources); rows whose raw model ID is claude-opus-5-5 would be unpriced without this entry. Claude Sonnet 5.5 and Claude Haiku 5.5 are announced to follow 'in the coming weeks' -- add them as separate entries when their model IDs and prices are published, never as aliases of the 5.x entries."
   ],
   "sources": [
     {
@@ -60,6 +61,26 @@
       "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
       "retrieved_at": "2026-09-09",
       "note": "cache write TTL multipliers (5m = 1.25x, 1h = 2x), cross-checked against the pricing page cache columns"
+    },
+    {
+      "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "retrieved_at": "2026-09-23",
+      "note": "used for claude-opus-5-5 (Opus 5.5 row: $4 / $5 / $8 / $0.20 / $20, footnote 2 cache_read 0.05x, fast mode $8/$40); fetched via WebFetch, no local snapshot"
+    },
+    {
+      "url": "https://www.anthropic.com/claude-opus-5-5",
+      "retrieved_at": "2026-09-23",
+      "note": "Opus 5.5 announcement: public launch date September 22, 2026, model ID claude-opus-5-5, Sonnet 5.5 / Haiku 5.5 to follow"
+    },
+    {
+      "url": "https://www.anthropic.com/news/claude-opus-5",
+      "retrieved_at": "2026-09-23",
+      "note": "Opus 5 announcement dated Jul 24, 2026; used to replace the claude-opus-5 effective_from placeholder"
+    },
+    {
+      "url": "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md",
+      "retrieved_at": "2026-09-23",
+      "note": "Claude Code 2.1.280 entry: Claude Opus 5.5 became the default model (1M context, $4/$20 per MTok, $0.20/MTok cache reads); the reason claude-opus-5-5 rows are expected in transcripts from that version"
     }
   ],
   "models": [
@@ -137,14 +158,31 @@
       "fast_multiplier": "2.0",
       "rates": [
         {
-          "rate_id": "claude-opus-5-launch-date-unconfirmed",
-          "effective_from": "2026-07-01T00:00:00+00:00",
+          "rate_id": "claude-opus-5-launch-2026-07-24",
+          "effective_from": "2026-07-24T00:00:00+00:00",
           "effective_until": null,
           "input_nocache": "5.0",
           "cache_read": "0.50",
           "cache_write_5m": "6.25",
           "cache_write_1h": "10.0",
           "output": "25.0"
+        }
+      ]
+    },
+    {
+      "model_key": "claude-opus-5-5",
+      "aliases": [],
+      "fast_multiplier": "2.0",
+      "rates": [
+        {
+          "rate_id": "claude-opus-5-5-launch-2026-09-22",
+          "effective_from": "2026-09-22T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "4.0",
+          "cache_read": "0.20",
+          "cache_write_5m": "5.0",
+          "cache_write_1h": "8.0",
+          "output": "20.0"
         }
       ]
     },
