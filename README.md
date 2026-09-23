@@ -47,7 +47,8 @@ agent-cost report
 The PyPI distribution is named [`coding-agent-cost`](https://pypi.org/project/coding-agent-cost/),
 while the command remains `agent-cost` and the import remains `agent_cost`. The shorter PyPI
 name is unavailable because of PyPI's similarity rule; this project is not affiliated with the
-unrelated `agentcost` distribution.
+unrelated `agentcost` distribution. Releases are published from a `v*` tag by GitHub Actions
+through PyPI's Trusted Publisher; see [docs/release.md](docs/release.md).
 
 ## Synthetic output example
 

@@ -1,0 +1,221 @@
+{
+  "schema_version": "3.0",
+  "intent_id": "I-2026-09-23-agent-cost-pypi-trusted-publisher",
+  "tracker_url": null,
+  "pr_url": null,
+  "pr_provenance": null,
+  "owner": "shiki-yusuke",
+  "current_phase": "4_verify",
+  "status": "running",
+  "created_at": "2026-09-23T06:43:54.309Z",
+  "updated_at": "2026-09-23T07:52:40.419Z",
+  "phase_history": [
+    {
+      "phase": "1_intent",
+      "started_at": "2026-09-23T06:43:54.309Z",
+      "ended_at": "2026-09-23T07:35:28.376Z",
+      "result": "completed",
+      "retry_count": 0
+    },
+    {
+      "phase": "2_spec",
+      "started_at": "2026-09-23T07:35:28.376Z",
+      "ended_at": "2026-09-23T07:35:28.451Z",
+      "result": "completed",
+      "retry_count": 0
+    },
+    {
+      "phase": "3_implement",
+      "started_at": "2026-09-23T07:35:28.451Z",
+      "result": "completed",
+      "retry_count": 0,
+      "ended_at": "2026-09-23T07:52:40.419Z"
+    },
+    {
+      "phase": "4_verify",
+      "started_at": "2026-09-23T07:52:40.419Z",
+      "result": "in_progress",
+      "retry_count": 0
+    }
+  ],
+  "halt_info": null,
+  "retry_log": [],
+  "effective_risk_log": [
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T06:45:22.094Z"
+    },
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T06:48:48.283Z"
+    },
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T06:49:08.257Z"
+    },
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T06:58:33.743Z"
+    },
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T06:59:02.197Z"
+    },
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T07:16:02.472Z"
+    },
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T07:26:12.754Z"
+    },
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T07:26:31.654Z"
+    },
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T07:26:38.065Z"
+    },
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T07:26:50.427Z"
+    },
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T07:27:43.000Z"
+    },
+    {
+      "gate_id": "phase_advance",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T07:35:28.372Z"
+    },
+    {
+      "gate_id": "phase_advance",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T07:35:28.447Z"
+    },
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T07:39:05.860Z"
+    },
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T07:39:40.639Z"
+    },
+    {
+      "gate_id": "validate",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T07:52:40.337Z"
+    },
+    {
+      "gate_id": "phase_advance",
+      "effective_risk": "high",
+      "applied_rule_ids": [
+        "ci-workflow-touch"
+      ],
+      "profile_digest": "d72951e0e685b0a1e0ea7d370fbce3e7f45f8e549d28657a123735486c2c88ca",
+      "evaluated_at": "2026-09-23T07:52:40.414Z"
+    }
+  ],
+  "mode_resolution_log": [],
+  "cost_ledger": [],
+  "usage_import_attempts": [],
+  "usage_import_gate_overrides": [],
+  "gate_ruleset_version": "1.0",
+  "gate_snapshots": {
+    "premise_evidence": {
+      "method": "data",
+      "reproduced": true,
+      "recorded_at": "2026-09-23T07:35:28.376Z"
+    },
+    "success_criteria": {
+      "criteria": [
+        "tag push だけが publish を起動する: release workflow のトリガーは v<version> 形式の tag push と workflow_dispatch の 2 つだけで、main への push や pull_request では起動しない。tag push では tag の version と pyproject.toml の version の一致を検証してから sdist + wheel を build し、twine check --strict を通し、PyPI の Trusted Publisher（OIDC）で公開する。否定側: tag と version が不一致なら build job が fail して publish job に到達しない（TEST-01）。workflow_dispatch では publish job と github-release job が skipped になる（TEST-06、TEST-08）",
+        "長期トークンを参照しない: release.yml は secrets.GITHUB_TOKEN 以外の secrets を参照せず、password 入力や TWINE_PASSWORD / TWINE_USERNAME / PYPI_API_TOKEN 系の環境変数を持たず、id-token: write は publish job にだけ付く。repo secrets に PyPI 系の secret が存在しないことを gh secret list で確認する（人間 gate、2026-09-23 時点で 0 件）。否定側: workflow-lint は改変 fixture（secrets.PYPI_API_TOKEN を足したもの）で exit 1 になる（TEST-02）",
+        "公開物の三者一致: publish した sdist と wheel、その sha256 一覧（SHA256SUMS）が同じ tag の GitHub Release に添付され、(a) Release assets のファイル名集合が『SHA256SUMS に列挙された配布物 + SHA256SUMS 自体』と完全一致（余剰も欠落も不可）、(b) 各配布物 asset の sha256 が SHA256SUMS と一致、(c) PyPI JSON API の digests.sha256 が SHA256SUMS と filename 集合ごと完全一致する。否定側: verify-pypi は欠落・余剰・不一致・重複行・不正 digest・HTTP 失敗のいずれでも exit 1（TEST-03）。docs/release.md に不一致時の対応（yank と patch version での再リリース）がある",
+        "手順書: docs/release.md に version bump → CHANGELOG → PR merge → tag push → workflow 結果確認 → verify-pypi → 失敗時の回復（build 失敗は修正して新 tag、PyPI 公開後の Release 添付失敗は失敗 job のみ再実行または検証済み artifact の手動添付、同 tag の全 job 再実行と tag の再利用は禁止）を記載する。README は pip install と docs/release.md へのリンクのみ。否定側: TEST-04 は docs / README に ~/.pypirc または twine upload が手順として現れると exit 1（改変 fixture で確認）",
+        "無退行: .github/workflows/ci.yml は 1 バイトも変更しない（forbidden_paths）。否定側: TEST-05 = git diff main -- .github/workflows/ci.yml が空でなければ fail（1 行変えた作業ツリーで非空になることを 1 回確認して記録し、元に戻す）",
+        "実走確認: (a) workflow_dispatch でのドライラン（workflow-lint + build + twine check、publish 無し）が green で publish / github-release が skipped（TEST-06）。(b) 次の実リリース（tag push は人間）で PyPI 公開・Release assets 3 件・三者一致（TEST-07）を人間が確認し manual_verification に記録する。(b) までは 5_done にしない"
+      ],
+      "recorded_at": "2026-09-23T07:52:40.419Z"
+    }
+  }
+}

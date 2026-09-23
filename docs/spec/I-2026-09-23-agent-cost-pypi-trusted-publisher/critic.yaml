@@ -1,0 +1,57 @@
+schema_version: "1.0"
+intent_id: I-2026-09-23-agent-cost-pypi-trusted-publisher
+decision: pass
+confidence: medium
+# Re-judged against spec v4 and the current implementation (2026-09-23) after sol run 1〜4.
+# v4 additions covered below: allowlist-exact lint (jobs / needs / uses sequence / artifact
+# name+path / permissions mapping / secrets per expression / literal on: / attestations).
+per_lens:
+  - lens_id: lifecycle_management
+    result: applicable
+    finding: "publish 成功後に github-release が失敗すると『PyPI にはあるが Release に無い』状態（§2.6 S1）が残る。同 tag の全 job 再実行は PyPI が同 filename を拒否して赤で止まるので、回復は『失敗 job のみ再実行』か『同 run の artifact を手動添付』に限定し（RULE-11、D8）、docs/release.md の文言を TEST-09 で固定した。逆に publish 失敗（S0）は何も残らないので同一 run の再実行で回復できる。"
+    taxonomy: missing_state
+    evidence: "spec v3 D1（github-release は needs: publish）、§2.6 外部状態 × 再試行操作、RULE-11、TEST-09（4 文言の存在検査）。"
+    knowledge_candidates: []
+  - lens_id: error_handling
+    result: applicable
+    finding: "fail-closed の検査は 4 系統（version 一致 RULE-03 / workflow-lint RULE-02・04・05・06・13 / verify-pypi RULE-07 / docs-lint RULE-10・11）で、いずれも exit 1 と理由行。構造上検出できないのは workflow_dispatch 時の tag/version 不一致（tag が無い）で、これは TEST-01 の単体テストと docs の注記で補う。"
+    taxonomy: missing_state
+    evidence: "spec v3 D2、§5.1 SUCCESS→RULE→TEST 表（各 SUCCESS に否定側 TEST）、release_checks.py の CheckFailure 集約。"
+    knowledge_candidates: []
+  - lens_id: security
+    result: applicable
+    finding: "長期トークンの除去が目的。残るリスクと緩和: (a) action 改竄 → 40 桁 SHA pin を lint で強制（RULE-06）。(b) publish の実行主体は『v* tag を push できる人』で、旧経路の『トークンを持つ人』と同じ 1 名（environment 保護は non_goal）。(c) gh の認証は workflow 自身の GITHUB_TOKEN のみに限定（RULE-13、lint (h)）。(d) `if` の緩和（`||`）や `tags: ['*']` による publish 範囲の拡大は完全一致検査で拒否（RULE-02、TEST-08）。(e) run: に流し込む値は $GITHUB_REF_NAME / env 経由の TAG のみで、event payload の自由文字列は使わない。"
+    taxonomy: wrong_assumption
+    evidence: "spec v3 D3 / D4 (e)(f)(h) / RULE-13、release.yml の permissions（top-level contents: read、publish = id-token: write、github-release = contents: write）。"
+    knowledge_candidates: []
+  - lens_id: performance
+    result: not_applicable
+  - lens_id: a11y
+    result: not_applicable
+  - lens_id: i18n
+    result: not_applicable
+  - lens_id: architecture
+    result: applicable
+    finding: "ci.yml の package job と release.yml の build job は build を二重定義する。ci.yml を触らない制約（RULE-09、forbidden_paths）を優先し、共通化（reusable workflow）は本 lane で行わない。検査ロジックは release_checks.py に集約し、workflow はそれを呼ぶだけにして、同じスクリプトを人間が手元でも実行できる形にした。"
+    taxonomy: too_implementation_specific
+    evidence: "spec v3 §2.4 PATH-01 行、RULE-09、D1 の build step 列。"
+    knowledge_candidates: []
+  - lens_id: test_coverage
+    result: applicable
+    finding: "横断表（PATH × DEP）は静的依存しか見ないため、外部状態 × 再試行操作の表（§2.6）を別軸として追加した。独立に再探索した結果: (1) `if` の『含有』検査では `|| true` が通る → 完全一致に変更し否定 fixture を追加（TEST-08）。(2) Release assets は 3 件で SHA256SUMS の 2 件と集合が異なる → 『配布物 + SHA256SUMS 自体』の完全一致に定義し余剰と欠落を TEST-03 に追加。(3) attestations 既定の根拠が可変ブランチだった → pin SHA の action.yml default 'true' に固定（D7）。(4) gh の認証供給が spec に無かった → RULE-13 と lint (h)。(5) v4: allowlist 所属だけの検査は『必須 step の欠落・重複・job 間移動・download path の改変』を通す → job ごとの uses 順序と artifact (kind, name, path) 列を期待値と完全一致させ、否定 fixture 5 件（checksum upload 削除 / pypa step 重複 / checkout を publish に移動 / publish の download path 変更 / github-release の checksums path 変更）を追加。secrets は式単位、permissions は mapping 完全一致、`on:` は raw 行必須、attestations false 拒否も同様に否定 fixture で固定。実走でしか観測できない TEST-06 / TEST-07 は manual_verification に残す。"
+    taxonomy: test_missing
+    evidence: "spec v4 §5.1 / §5.2 / D4 (i)、test_release_checks.py（58 tests: TEST-01 ×3、TEST-02 ×1 正側 + 28 fixtures + 1 単独、TEST-08 ×4、TEST-03 ×14、TEST-04 ×3、TEST-09 ×4、いずれも spec の RULE から期待値を導出）。"
+    knowledge_candidates: []
+  - lens_id: documentation
+    result: applicable
+    finding: "publish 手順の正本は docs/release.md の 1 箇所。README は pip install と docs/release.md へのリンクのみ（元の README に publish 手順は無かった）。docs-lint が旧経路の記述（twine upload / .pypirc）を手順として書くことを拒否し、『不要になった』と述べる行だけ許容する（RULE-10、TEST-04）。"
+    taxonomy: scope_ambiguity
+    evidence: "spec v3 D8、RULE-10、docs/release.md、README.md の 1 行。"
+    knowledge_candidates: []
+halt_triggers: []
+missing_scenarios: []
+wrong_assumptions: []
+open_questions: []
+required_actions:
+  - "PR merge 後、人間が PyPI で Trusted Publisher を登録（D6）し、gh secret list で PyPI 系 secret の不在を確認（TEST-10）してから workflow_dispatch のドライラン（TEST-06）を実行する"
+  - "次の実リリースで TEST-07（三者一致）を人間が確認して manual_verification に記録するまで 5_done にしない"
