@@ -1,0 +1,141 @@
+# Release: tag push -> build -> PyPI (Trusted Publisher, OIDC) -> GitHub Release assets.
+# Spec: docs/spec/I-2026-09-23-agent-cost-pypi-trusted-publisher/spec.md
+# Procedure and recovery rules: docs/release.md
+#
+# Only two triggers exist (RULE-02): a `v*` tag push publishes; workflow_dispatch is a
+# dry run that stops after build + checks (publish and github-release are skipped).
+# main pushes and pull requests never start this workflow -- ci.yml covers those.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned tooling (RULE-12)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build==1.6.1 twine==7.0.0 pyyaml==6.0.3 pytest==9.1.1
+      - name: Lint this workflow (RULE-02 / 04 / 05 / 06)
+        run: python .github/scripts/release_checks.py workflow-lint .github/workflows/release.yml
+      - name: Guardrail unit tests
+        run: python -m pytest -q .github/scripts
+      - name: Lint release docs (RULE-10 / 11)
+        run: python .github/scripts/release_checks.py docs-lint --release-doc docs/release.md --readme README.md
+      - name: Tag must match pyproject version (RULE-03; tag pushes only)
+        if: github.event_name == 'push'
+        run: python .github/scripts/release_checks.py version --tag "$GITHUB_REF_NAME"
+      - name: Build sdist and wheel
+        run: python -m build
+      - name: twine check
+        run: python -m twine check --strict dist/*
+      - name: Exactly one wheel and one sdist (RULE-05)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(ls dist/*.whl | wc -l)" -eq 1
+          test "$(ls dist/*.tar.gz | wc -l)" -eq 1
+          test "$(ls dist | wc -l)" -eq 2
+      - name: Write SHA256SUMS (outside dist/ so publish only sees distributions)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p checksums
+          (cd dist && sha256sum *) > checksums/SHA256SUMS
+          cat checksums/SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-checksums
+          path: checksums/SHA256SUMS
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI (Trusted Publisher)
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-dist
+          path: dist/
+      # No API token: the action exchanges GitHub's OIDC token for a short-lived PyPI
+      # token (Trusted Publisher registered on PyPI for this repo/workflow/environment).
+      # Sigstore attestations stay at the action's default (on) -- RULE-08.
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+
+  github-release:
+    name: Attach assets to GitHub Release
+    needs: publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-dist
+          path: dist/
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-checksums
+          path: checksums/
+      - name: Create the release if missing, then attach the exact published files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "$TAG" --notes "See CHANGELOG.md for $TAG."
+          fi
+          gh release upload "$TAG" dist/*.whl dist/*.tar.gz checksums/SHA256SUMS --clobber
+      # --clobber only replaces same-named assets; it never removes an unrelated asset that a
+      # human attached to a pre-created release. Fail closed if the remote set is not exactly
+      # the three files we just verified locally (the maintainer removes extras by hand).
+      - name: Verify the release carries exactly wheel, sdist and SHA256SUMS (RULE-07)
+        shell: bash
+        run: |
+          set -euo pipefail
+          whl=(dist/*.whl)
+          sdist=(dist/*.tar.gz)
+          test "${#whl[@]}" -eq 1
+          test "${#sdist[@]}" -eq 1
+          test -f "${whl[0]}"
+          test -f "${sdist[0]}"
+          expected="$(printf '%s\n' "$(basename "${whl[0]}")" "$(basename "${sdist[0]}")" SHA256SUMS | sort)"
+          actual="$(gh release view "$TAG" --json assets --jq '.assets[].name' | sort)"
+          if [ "$expected" != "$actual" ]; then
+            echo "release $TAG asset set differs from the published files:" >&2
+            printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
+            exit 1
+          fi

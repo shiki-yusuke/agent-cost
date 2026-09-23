@@ -1,0 +1,201 @@
+schema_version: "1.0"
+intent_id: I-2026-09-23-agent-cost-pypi-trusted-publisher
+test_matrix:
+  - ears_rule: RULE-03
+    test_type: unit
+    test_name: test_01_version_matches_real_pyproject /
+      test_01_version_mismatch_exits_1 / test_01_version_tag_without_v_exits_1
+    status: added
+    note: TEST-01。.github/scripts/test_release_checks.py。期待値は RULE-03（tag と
+      pyproject の完全一致、v 接頭）から導出
+  - ears_rule: RULE-02, RULE-03, RULE-04, RULE-05, RULE-06, RULE-12, RULE-13, RULE-15
+    test_type: unit
+    test_name: test_02_real_workflow_passes_lint /
+      test_02_mutated_workflow_fails_lint[38 fixtures] /
+      test_02_asset_check_step_deleted_entirely_fails_lint（単独 1 件） /
+      test_02_release_job_if_alone_cannot_be_loosened（単独 1 件）
+    status: added
+    note: TEST-02。正側 = 実 release.yml が exit 0。否定側 = spec §5.2 TEST-02 の fixture 38
+      件（secrets index 構文・toJSON(secrets)・write-all・余分な job・reusable
+      workflow・needs 拡張・別 action 名 + 同 SHA・attestations false・artifact 改名・on の
+      list 形・true キーによる on 偽装・step 契約 10 件 = version 検証 step の削除 / 空洞化 / || true
+      / コメント退避 / 追加コマンド / if 除去、twine check の no-op 化、asset 検証 step の改名 / no-op
+      化）+ 単独 2 件（github-release の if 単独改変、asset 検証 step の丸ごと削除）
+  - ears_rule: RULE-02
+    test_type: unit
+    test_name: test_08_publish_if_must_be_tag_only[4 fixtures]
+    status: added
+    note: TEST-08。tag 条件の削除 / `|| true` / refs/tags/ への緩和 / if 欠落 のいずれも lint が拒否
+  - ears_rule: RULE-07
+    test_type: unit
+    test_name: test_03_* (14 tests)
+    status: added
+    note: TEST-03。HTTP は --pypi-json で注入。三者一致 exit 0、PyPI 欠落 / 余剰 / digest 不一致 / 重複行
+      / 不正 digest / 空 SUMS / 取得不能 / JSON 不正 / urls 無し / assets 欠落 / 余剰 / sha 不一致
+      / SUMS 自体欠落 は exit 1
+  - ears_rule: RULE-10, RULE-11
+    test_type: unit
+    test_name: test_04_real_docs_pass / test_04_twine_upload_as_procedure_fails /
+      test_04_readme_twine_procedure_fails /
+      test_09_recovery_wording_required[4]
+    status: added
+    note: TEST-04 / TEST-09。docs/release.md と README.md。旧経路を手順として書くと exit
+      1、回復文言（Re-run failed jobs / git tag -f / all jobs / Reusing a tag）が欠けると
+      exit 1
+  - ears_rule: RULE-09
+    test_type: regression
+    test_name: git diff --quiet main -- .github/workflows/ci.yml
+    status: added
+    note: TEST-05。2026-09-23 に diff 空を確認。否定側は 1 行追記で非空になることを確認して復元（下の
+      manual_verification）
+  - ears_rule: RULE-12, RULE-08
+    test_type: manual
+    test_name: release.yml の pin 行（build==1.6.1 twine==7.0.0 pyyaml==6.0.3
+      pytest==9.1.1、action 5 本の SHA、attestations 無指定）
+    status: added
+    note: レビューで逐条確認。attestations 既定 true は pin SHA の action.yml で確認（spec D7）
+  - ears_rule: RULE-14
+    test_type: manual
+    test_name: github-release の asset 集合検証 step（gh release view --json assets の name
+      集合 = {wheel, sdist, SHA256SUMS}）
+    status: added
+    note: v5（Copilot
+  - ears_rule: RULE-01
+    test_type: manual
+    test_name: TEST-07 次の実リリース（tag push → publish → Release assets 3 件 → verify-pypi
+      --assets-dir exit 0）
+    status: tbd
+    note: 実走でしか観測できない。人間が実施し manual_verification に記録するまで 5_done にしない
+test_gaps:
+  - taxonomy: test_missing
+    description: RULE-02（workflow_dispatch で publish / github-release が
+      skipped）は実走（TEST-06）でしか確認できない。静的には TEST-08 で if の完全一致を固定済み。PR merge 後に人間が
+      Actions から手動実行し skipped を確認して manual_verification TEST-06 に追記する
+    location: .github/workflows/release.yml
+    priority: medium
+  - taxonomy: test_missing
+    description: RULE-01 / RULE-05 / RULE-08（実 publish、artifact 受け渡し、attestations
+      既定）は PyPI 側の Trusted Publisher 登録（人間、D6）後の実リリースでのみ観測できる。TEST-07
+      を次の実リリースで実施し、5_done はそれまで保留
+    location: .github/workflows/release.yml
+    priority: high
+manual_verification:
+  - id: TEST-05-negation
+    description: "ci.yml 無退行の否定側: ci.yml に 1 行追記して git diff main --
+      .github/workflows/ci.yml が非空になることを確認し、復元後に空へ戻ることを確認する"
+    expected_status: done 2026-09-23（非空 → 復元で空。実 diff は空のまま）
+  - id: TEST-10
+    description: repo secrets に PyPI 系（PYPI* / TWINE*）の名前が無いことを gh secret list -R
+      shiki-yusuke/agent-cost で確認する（RULE-04 の人間 gate）
+    expected_status: done 2026-09-23（0 件）
+  - id: local-checks
+    description: 手元で python -m pytest -q
+      .github/scripts、workflow-lint、docs-lint、version --tag v0.2.1、既存 tests
+      を実行する
+    expected_status: done 2026-09-23（68 passed / lint ok / docs ok / version ok / 241 passed）
+  - id: TEST-06
+    description: PR merge 後、Actions から release workflow を workflow_dispatch
+      で実行し、build が green、publish と github-release が skipped であることを run URL
+      とともに記録する
+    expected_status: pending（PR merge 後、人間）
+  - id: TEST-07
+    description: 次の実リリース（tag push は人間）で publish 成功・Release assets 3 件・verify-pypi
+      --assets-dir exit 0 を記録する。これが済むまで 5_done にしない
+    expected_status: pending（次の実リリース、人間）
+goal_stopping_condition:
+  - success_criteria_matrix 全行が covered_by none 以外
+  - TEST-06 と TEST-07 が manual_verification に記録されるまで lane を 5_done にしない
+spec_consensus:
+  spec_ssot_ref: docs/spec/I-2026-09-23-agent-cost-pypi-trusted-publisher/spec.md
+  spec_digest: 79008561bab93eb203f776f146e1586c29cdef86ab09083a967b21edbec2f9ff
+  verification_digest: 18a327d5e5242705e37351e1a019e1b4064276abdb74b6d9d9b5cb6d9f0a49f3
+  deviations:
+    - spec_ref: spec v4 D1-D8 / RULE-01-13
+      actual: "実装は spec v4 と逐条一致（sol run 4b: [18][19][20][22][23][24] 解消。[21] は
+        EXPECTED_USES_SEQUENCE / EXPECTED_ARTIFACT_STEPS と否定 fixture 5 件で固定、run
+        5 は Codex 起動遅延で判定なし）。RULE-04 の禁止 env は intent の PYPI_API_TOKEN 系より広く
+        PYPI_TOKEN / UV_PUBLISH_TOKEN も拒否（強い側）。逸脱なし"
+      action: accept
+      status: resolved
+      rationale: 実装が spec より弱い箇所は無し。強い側の差（禁止 env の追加）は intent を弱めないので intent は不変
+      evidence_ref: ~/ai_bus/logs/tp-sol-review-run4b-*.last.md, pytest 68 passed
+  reviewer_ack:
+    reviewer_kind: independent_agent
+    reviewer_id: copilot-review-5288468185+codex-terra-medium-2026-09-23
+    acked_at: 2026-09-23T08:25:01.791Z
+    spec_sha256: 79008561bab93eb203f776f146e1586c29cdef86ab09083a967b21edbec2f9ff
+    verification_sha256: 18a327d5e5242705e37351e1a019e1b4064276abdb74b6d9d9b5cb6d9f0a49f3
+    note: "PR #14 Copilot 3 件 + terra 5 件を v5 で反映: step
+      契約を正規化後スクリプト全文の完全一致に（RULE-15）、asset 集合検証の bash
+      を配列・引用付き比較に（RULE-14）、RULE-11 分離。tests 68"
+success_criteria_matrix:
+  - criterion: "tag push だけが publish を起動する: release workflow のトリガーは v<version> 形式の
+      tag push と workflow_dispatch の 2 つだけで、main への push や pull_request
+      では起動しない。tag push では tag の version と pyproject.toml の version の一致を検証してから
+      sdist + wheel を build し、twine check --strict を通し、PyPI の Trusted
+      Publisher（OIDC）で公開する。否定側: tag と version が不一致なら build job が fail して publish
+      job に到達しない（TEST-01）。workflow_dispatch では publish job と github-release job
+      が skipped になる（TEST-06、TEST-08）"
+    covered_by: test
+    evidence: release.yml の on / if / needs（lint (e)(f)
+      で固定、test_02_real_workflow_passes_lint）、test_01_*、test_08_*
+    negation_test: test_01_version_mismatch_exits_1、test_08_publish_if_must_be_tag_only（if
+      欠落 fixture で lint exit 1）
+  - criterion: "長期トークンを参照しない: release.yml は secrets.GITHUB_TOKEN 以外の secrets
+      を参照せず、password 入力や TWINE_PASSWORD / TWINE_USERNAME / PYPI_API_TOKEN
+      系の環境変数を持たず、id-token: write は publish job にだけ付く。repo secrets に PyPI 系の
+      secret が存在しないことを gh secret list で確認する（人間 gate、2026-09-23 時点で 0 件）。否定側:
+      workflow-lint は改変 fixture（secrets.PYPI_API_TOKEN を足したもの）で exit 1
+      になる（TEST-02）"
+    covered_by: test
+    evidence: test_02_real_workflow_passes_lint、manual_verification TEST-10（gh
+      secret list 0 件）
+    negation_test: test_02_mutated_workflow_fails_lint[secrets.PYPI_API_TOKEN /
+      with.password / env.TWINE_PASSWORD / id-token on build]
+  - criterion: "公開物の三者一致: publish した sdist と wheel、その sha256 一覧（SHA256SUMS）が同じ tag の
+      GitHub Release に添付され、(a) Release assets のファイル名集合が『SHA256SUMS に列挙された配布物 +
+      SHA256SUMS 自体』と完全一致（余剰も欠落も不可）、(b) 各配布物 asset の sha256 が SHA256SUMS と一致、(c)
+      PyPI JSON API の digests.sha256 が SHA256SUMS と filename 集合ごと完全一致する。否定側:
+      verify-pypi は欠落・余剰・不一致・重複行・不正 digest・HTTP 失敗のいずれでも exit
+      1（TEST-03）。docs/release.md に不一致時の対応（yank と patch version での再リリース）がある"
+    covered_by: test
+    evidence: test_03_three_way_match_exits_0、release.yml github-release job（3
+      assets を --clobber で添付）、docs/release.md Recovery 節
+    negation_test: test_03_pypi_missing_file_exits_1 /
+      test_03_pypi_extra_file_exits_1 / test_03_pypi_digest_mismatch_exits_1 /
+      test_03_duplicate_sums_line_exits_1 / test_03_malformed_digest_exits_1 /
+      test_03_pypi_unavailable_exits_1 / test_03_assets_extra_file_exits_1 ほか
+  - criterion: "手順書: docs/release.md に version bump → CHANGELOG → PR merge → tag
+      push → workflow 結果確認 → verify-pypi → 失敗時の回復（build 失敗は修正して新 tag、PyPI 公開後の
+      Release 添付失敗は失敗 job のみ再実行または検証済み artifact の手動添付、同 tag の全 job 再実行と tag
+      の再利用は禁止）を記載する。README は pip install と docs/release.md へのリンクのみ。否定側: TEST-04
+      は docs / README に ~/.pypirc または twine upload が手順として現れると exit 1（改変 fixture
+      で確認）"
+    covered_by: test
+    evidence: docs/release.md（Releasing / Recovery 節）、README.md の 1
+      行、test_04_real_docs_pass、test_09_recovery_wording_required
+    negation_test: test_04_twine_upload_as_procedure_fails /
+      test_04_readme_twine_procedure_fails / test_09_recovery_wording_required[4
+      文言]
+  - criterion: "無退行: .github/workflows/ci.yml は 1 バイトも変更しない（forbidden_paths）。否定側:
+      TEST-05 = git diff main -- .github/workflows/ci.yml が空でなければ fail（1
+      行変えた作業ツリーで非空になることを 1 回確認して記録し、元に戻す）"
+    covered_by: manual
+    evidence: manual_verification TEST-05-negation（2026-09-23、diff 空 → 1 行追記で非空 → 復元で空）
+    negation_test: 同上（1 行追記で非空を実測）
+  - criterion: "実走確認: (a) workflow_dispatch でのドライラン（workflow-lint + build + twine
+      check、publish 無し）が green で publish / github-release が skipped（TEST-06）。(b)
+      次の実リリース（tag push は人間）で PyPI 公開・Release assets 3 件・三者一致（TEST-07）を人間が確認し
+      manual_verification に記録する。(b) までは 5_done にしない"
+    covered_by: manual
+    evidence: manual_verification TEST-06 / TEST-07（pending。PR merge と PyPI
+      登録の後に人間が実施）、goal_stopping_condition に 5_done 条件を明記
+    negation_test: TEST-08（dispatch で publish が走る構成は lint が拒否）。実走の否定側は TEST-07 の
+      verify-pypi exit 1 経路
+cross_check_intent_vs_spec:
+  performed_at: 2026-09-23 (Phase 3)
+  finding: intent.success 6 行 ↔ matrix 6 行を行順で 1 対 1 突合、過不足なし。spec v3 が intent
+    より強い条件を置いた箇所 = RULE-13（GH_TOKEN の供給元限定）と RULE-12（pyyaml / pytest の pin）。いずれも
+    success 2 / success 1 の「長期トークン不参照」「build の再現性」を実装レベルで具体化したもので、intent
+    の記述より弱くはない。intent の success 2 は「PYPI_API_TOKEN 系」と書き、実装は PYPI_TOKEN /
+    UV_PUBLISH_TOKEN も禁止する（強い側）。intent は書き換えない
