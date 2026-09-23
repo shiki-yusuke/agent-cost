@@ -126,11 +126,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected="$(cd dist && ls *.whl *.tar.gz; echo SHA256SUMS)"
-          actual="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
-          if [ "$(printf '%s\n' $expected | sort)" != "$(printf '%s\n' $actual | sort)" ]; then
+          whl=(dist/*.whl)
+          sdist=(dist/*.tar.gz)
+          test "${#whl[@]}" -eq 1
+          test "${#sdist[@]}" -eq 1
+          test -f "${whl[0]}"
+          test -f "${sdist[0]}"
+          expected="$(printf '%s\n' "$(basename "${whl[0]}")" "$(basename "${sdist[0]}")" SHA256SUMS | sort)"
+          actual="$(gh release view "$TAG" --json assets --jq '.assets[].name' | sort)"
+          if [ "$expected" != "$actual" ]; then
             echo "release $TAG asset set differs from the published files:" >&2
-            echo "expected: $expected" >&2
-            echo "actual:   $actual" >&2
+            printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
             exit 1
           fi

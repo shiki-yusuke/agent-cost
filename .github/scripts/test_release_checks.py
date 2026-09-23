@@ -124,13 +124,21 @@ def test_02_real_workflow_passes_lint(capsys):
         # RULE-03: the tag/version check step deleted (Copilot #1) -- every uses step still matches.
         ("      - name: Tag must match pyproject version (RULE-03; tag pushes only)\n        if: github.event_name == 'push'\n        run: python .github/scripts/release_checks.py version --tag \"$GITHUB_REF_NAME\"\n", "", "expected 13 steps"),
         # RULE-03: the version check kept in place but hollowed out.
-        ("        run: python .github/scripts/release_checks.py version --tag \"$GITHUB_REF_NAME\"", "        run: echo skip", "run script must contain"),
+        ("        run: python .github/scripts/release_checks.py version --tag \"$GITHUB_REF_NAME\"", "        run: echo skip", "run script must be exactly"),
+        # RULE-03: failure swallowed with `|| true` (terra #1).
+        ("        run: python .github/scripts/release_checks.py version --tag \"$GITHUB_REF_NAME\"", "        run: python .github/scripts/release_checks.py version --tag \"$GITHUB_REF_NAME\" || true", "run script must be exactly"),
+        # RULE-03: the real command parked in a comment, followed by a no-op (terra #1).
+        ("        run: python .github/scripts/release_checks.py version --tag \"$GITHUB_REF_NAME\"", "        run: |\n          # python .github/scripts/release_checks.py version --tag \"$GITHUB_REF_NAME\"\n          true", "run script must be exactly"),
+        # RULE-03: an extra command appended after the genuine one.
+        ("        run: python .github/scripts/release_checks.py version --tag \"$GITHUB_REF_NAME\"", "        run: |\n          python .github/scripts/release_checks.py version --tag \"$GITHUB_REF_NAME\"\n          git tag -f \"$GITHUB_REF_NAME\"", "run script must be exactly"),
         # RULE-03: the version check's `if` removed (would now run on dispatch, hiding the contract).
         ("      - name: Tag must match pyproject version (RULE-03; tag pushes only)\n        if: github.event_name == 'push'\n", "      - name: Tag must match pyproject version (RULE-03; tag pushes only)\n", "if must be"),
         # RULE-12: twine check step replaced by a no-op with the same name.
-        ("        run: python -m twine check --strict dist/*", "        run: true", "run script must contain"),
-        # RULE-07: the remote asset-set check deleted (Copilot #2).
+        ("        run: python -m twine check --strict dist/*", "        run: true", "run script must be exactly"),
+        # RULE-07 / 14: the remote asset-set check renamed (terra #3: a rename alone is caught by the name check).
         ("      - name: Verify the release carries exactly wheel, sdist and SHA256SUMS (RULE-07)\n", "      - name: Something else\n", "expected run step"),
+        # RULE-07 / 14: the asset-set check kept its name but the script became a no-op.
+        ("          if [ \"$expected\" != \"$actual\" ]; then\n            echo \"release $TAG asset set differs from the published files:\" >&2\n            printf 'expected:\\n%s\\nactual:\\n%s\\n' \"$expected\" \"$actual\" >&2\n            exit 1\n          fi\n", "          true\n", "run script must be exactly"),
     ],
 )
 def test_02_mutated_workflow_fails_lint(tmp_path, capsys, old, new, expect):
@@ -149,6 +157,17 @@ def test_02_release_job_if_alone_cannot_be_loosened(tmp_path, capsys):
     assert run(["workflow-lint", str(wf)]) == 1
     err = capsys.readouterr().err
     assert "'github-release'" in err and "if must be exactly" in err
+
+
+def test_02_asset_check_step_deleted_entirely_fails_lint(tmp_path, capsys):
+    text = WORKFLOW.read_text(encoding="utf-8")
+    start = text.index("      # --clobber only replaces same-named assets")
+    end = text.index("            exit 1\n          fi\n", start) + len("            exit 1\n          fi\n")
+    wf = tmp_path / "release.yml"
+    wf.write_text(text[:start] + text[end:], encoding="utf-8")
+    assert run(["workflow-lint", str(wf)]) == 1
+    err = capsys.readouterr().err
+    assert "'github-release'" in err and "expected 4 steps, got 3" in err
 
 
 # ---------------------------------------------------------------- TEST-08 ---

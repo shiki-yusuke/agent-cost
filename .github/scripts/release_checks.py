@@ -91,23 +91,49 @@ EXPECTED_ARTIFACT_STEPS = {
     RELEASE_JOB: [("download", "release-dist", "dist/"), ("download", "release-checksums", "checksums/")],
 }
 # Full step contract per job, in order. Every step is either an allowlisted `uses`
-# ({"uses": ...}) or a named `run` step whose script must contain the listed markers
-# and whose `if` must equal the listed value (None = no `if`). Deleting, reordering or
-# hollowing out a run step (e.g. the tag/version check) is a violation (RULE-03 / 05).
+# ({"uses": ...}) or a named `run` step whose script must equal the expected script
+# EXACTLY after normalisation (trailing whitespace stripped, blank lines dropped; comment
+# lines are kept and compared too) and whose `if` must equal the listed value (None = no
+# `if`). Substring markers were rejected in review: `... || true`, a trailing `true`, or
+# the marker parked in a comment would have hollowed out the check while passing lint.
+# Consequence: any edit to a run script, including a comment, is a spec revision that
+# updates this table in the same change (RULE-03 / 05 / 15).
 TAG_PUSH_ONLY_IF = "github.event_name == 'push'"
+
+
+def _norm_script(text: object) -> List[str]:
+    return [ln.rstrip() for ln in str(text).splitlines() if ln.strip()]
+
+
 EXPECTED_STEPS: Dict[str, List[Dict[str, object]]] = {
     BUILD_JOB: [
         {"uses": _CHECKOUT},
         {"uses": _SETUP_PY},
-        {"name": "Install pinned tooling (RULE-12)", "run": ["pip install build==1.6.1 twine==7.0.0 pyyaml==6.0.3 pytest==9.1.1"], "if": None},
-        {"name": "Lint this workflow (RULE-02 / 04 / 05 / 06)", "run": ["release_checks.py workflow-lint .github/workflows/release.yml"], "if": None},
-        {"name": "Guardrail unit tests", "run": ["python -m pytest -q .github/scripts"], "if": None},
-        {"name": "Lint release docs (RULE-10 / 11)", "run": ["release_checks.py docs-lint --release-doc docs/release.md --readme README.md"], "if": None},
-        {"name": "Tag must match pyproject version (RULE-03; tag pushes only)", "run": ['release_checks.py version --tag "$GITHUB_REF_NAME"'], "if": TAG_PUSH_ONLY_IF},
-        {"name": "Build sdist and wheel", "run": ["python -m build"], "if": None},
-        {"name": "twine check", "run": ["python -m twine check --strict dist/*"], "if": None},
-        {"name": "Exactly one wheel and one sdist (RULE-05)", "run": ['test "$(ls dist/*.whl | wc -l)" -eq 1', 'test "$(ls dist/*.tar.gz | wc -l)" -eq 1', 'test "$(ls dist | wc -l)" -eq 2'], "if": None},
-        {"name": "Write SHA256SUMS (outside dist/ so publish only sees distributions)", "run": ["(cd dist && sha256sum *) > checksums/SHA256SUMS"], "if": None},
+        {"name": "Install pinned tooling (RULE-12)", "if": None, "run": _norm_script("""
+python -m pip install --upgrade pip
+python -m pip install build==1.6.1 twine==7.0.0 pyyaml==6.0.3 pytest==9.1.1
+""")},
+        {"name": "Lint this workflow (RULE-02 / 04 / 05 / 06)", "if": None, "run": _norm_script(
+            "python .github/scripts/release_checks.py workflow-lint .github/workflows/release.yml")},
+        {"name": "Guardrail unit tests", "if": None, "run": _norm_script("python -m pytest -q .github/scripts")},
+        {"name": "Lint release docs (RULE-10 / 11)", "if": None, "run": _norm_script(
+            "python .github/scripts/release_checks.py docs-lint --release-doc docs/release.md --readme README.md")},
+        {"name": "Tag must match pyproject version (RULE-03; tag pushes only)", "if": TAG_PUSH_ONLY_IF, "run": _norm_script(
+            'python .github/scripts/release_checks.py version --tag "$GITHUB_REF_NAME"')},
+        {"name": "Build sdist and wheel", "if": None, "run": _norm_script("python -m build")},
+        {"name": "twine check", "if": None, "run": _norm_script("python -m twine check --strict dist/*")},
+        {"name": "Exactly one wheel and one sdist (RULE-05)", "if": None, "run": _norm_script("""
+set -euo pipefail
+test "$(ls dist/*.whl | wc -l)" -eq 1
+test "$(ls dist/*.tar.gz | wc -l)" -eq 1
+test "$(ls dist | wc -l)" -eq 2
+""")},
+        {"name": "Write SHA256SUMS (outside dist/ so publish only sees distributions)", "if": None, "run": _norm_script("""
+set -euo pipefail
+mkdir -p checksums
+(cd dist && sha256sum *) > checksums/SHA256SUMS
+cat checksums/SHA256SUMS
+""")},
         {"uses": _UPLOAD},
         {"uses": _UPLOAD},
     ],
@@ -118,8 +144,29 @@ EXPECTED_STEPS: Dict[str, List[Dict[str, object]]] = {
     RELEASE_JOB: [
         {"uses": _DOWNLOAD},
         {"uses": _DOWNLOAD},
-        {"name": "Create the release if missing, then attach the exact published files", "run": ['gh release create "$TAG" --verify-tag', 'gh release upload "$TAG" dist/*.whl dist/*.tar.gz checksums/SHA256SUMS --clobber'], "if": None},
-        {"name": "Verify the release carries exactly wheel, sdist and SHA256SUMS (RULE-07)", "run": ['gh release view "$TAG" --json assets', "SHA256SUMS"], "if": None},
+        {"name": "Create the release if missing, then attach the exact published files", "if": None, "run": _norm_script("""
+set -euo pipefail
+if ! gh release view "$TAG" >/dev/null 2>&1; then
+  gh release create "$TAG" --verify-tag --title "$TAG" --notes "See CHANGELOG.md for $TAG."
+fi
+gh release upload "$TAG" dist/*.whl dist/*.tar.gz checksums/SHA256SUMS --clobber
+""")},
+        {"name": "Verify the release carries exactly wheel, sdist and SHA256SUMS (RULE-07)", "if": None, "run": _norm_script("""
+set -euo pipefail
+whl=(dist/*.whl)
+sdist=(dist/*.tar.gz)
+test "${#whl[@]}" -eq 1
+test "${#sdist[@]}" -eq 1
+test -f "${whl[0]}"
+test -f "${sdist[0]}"
+expected="$(printf '%s\\n' "$(basename "${whl[0]}")" "$(basename "${sdist[0]}")" SHA256SUMS | sort)"
+actual="$(gh release view "$TAG" --json assets --jq '.assets[].name' | sort)"
+if [ "$expected" != "$actual" ]; then
+  echo "release $TAG asset set differs from the published files:" >&2
+  printf 'expected:\\n%s\\nactual:\\n%s\\n' "$expected" "$actual" >&2
+  exit 1
+fi
+""")},
     ],
 }
 
@@ -303,10 +350,8 @@ def lint_workflow(path: Path) -> None:
                 if step.get("name") != want["name"]:
                     reasons.append(f"{label}: expected run step {want['name']!r}, got {step.get('name')!r} (D1 step contract)")
                     continue
-                run_text = str(step.get("run", ""))
-                for marker in want["run"]:  # type: ignore[union-attr]
-                    if str(marker) not in run_text:
-                        reasons.append(f"{label} ({want['name']}): run script must contain {marker!r} (D1 step contract)")
+                if _norm_script(step.get("run", "")) != want["run"]:
+                    reasons.append(f"{label} ({want['name']}): run script must be exactly the spec'd script (D1 step contract, RULE-15)")
                 cond = step.get("if")
                 cond_norm = None if cond is None else " ".join(str(cond).split())
                 if cond_norm != want["if"]:

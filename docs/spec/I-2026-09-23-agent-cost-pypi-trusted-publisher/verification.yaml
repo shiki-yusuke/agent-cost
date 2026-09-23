@@ -8,16 +8,19 @@ test_matrix:
     status: added
     note: TEST-01。.github/scripts/test_release_checks.py。期待値は RULE-03（tag と
       pyproject の完全一致、v 接頭）から導出
-  - ears_rule: RULE-02, RULE-04, RULE-05, RULE-06, RULE-13
+  - ears_rule: RULE-02, RULE-03, RULE-04, RULE-05, RULE-06, RULE-12, RULE-13, RULE-15
     test_type: unit
     test_name: test_02_real_workflow_passes_lint /
-      test_02_mutated_workflow_fails_lint[28 fixtures] /
+      test_02_mutated_workflow_fails_lint[38 fixtures] /
+      test_02_asset_check_step_deleted_entirely_fails_lint（単独 1 件） /
       test_02_release_job_if_alone_cannot_be_loosened（単独 1 件）
     status: added
-    note: TEST-02。正側 = 実 release.yml が exit 0。否定側 = spec §5.2 TEST-02 の fixture 28
+    note: TEST-02。正側 = 実 release.yml が exit 0。否定側 = spec §5.2 TEST-02 の fixture 38
       件（secrets index 構文・toJSON(secrets)・write-all・余分な job・reusable
       workflow・needs 拡張・別 action 名 + 同 SHA・attestations false・artifact 改名・on の
-      list 形・true キーによる on 偽装 を含む）+ github-release の if 単独改変
+      list 形・true キーによる on 偽装・step 契約 10 件 = version 検証 step の削除 / 空洞化 / || true
+      / コメント退避 / 追加コマンド / if 除去、twine check の no-op 化、asset 検証 step の改名 / no-op
+      化）+ 単独 2 件（github-release の if 単独改変、asset 検証 step の丸ごと削除）
   - ears_rule: RULE-02
     test_type: unit
     test_name: test_08_publish_if_must_be_tag_only[4 fixtures]
@@ -51,6 +54,12 @@ test_matrix:
       pytest==9.1.1、action 5 本の SHA、attestations 無指定）
     status: added
     note: レビューで逐条確認。attestations 既定 true は pin SHA の action.yml で確認（spec D7）
+  - ears_rule: RULE-14
+    test_type: manual
+    test_name: github-release の asset 集合検証 step（gh release view --json assets の name
+      集合 = {wheel, sdist, SHA256SUMS}）
+    status: added
+    note: v5（Copilot
   - ears_rule: RULE-01
     test_type: manual
     test_name: TEST-07 次の実リリース（tag push → publish → Release assets 3 件 → verify-pypi
@@ -83,7 +92,7 @@ manual_verification:
     description: 手元で python -m pytest -q
       .github/scripts、workflow-lint、docs-lint、version --tag v0.2.1、既存 tests
       を実行する
-    expected_status: done 2026-09-23（58 passed / lint ok / docs ok / version ok / 241 passed）
+    expected_status: done 2026-09-23（68 passed / lint ok / docs ok / version ok / 241 passed）
   - id: TEST-06
     description: PR merge 後、Actions から release workflow を workflow_dispatch
       で実行し、build が green、publish と github-release が skipped であることを run URL
@@ -98,8 +107,8 @@ goal_stopping_condition:
   - TEST-06 と TEST-07 が manual_verification に記録されるまで lane を 5_done にしない
 spec_consensus:
   spec_ssot_ref: docs/spec/I-2026-09-23-agent-cost-pypi-trusted-publisher/spec.md
-  spec_digest: 4b1d163352d1f5475582989f4baab96ba3b3fcab112f372f4819c4d218d38203
-  verification_digest: 5997570f5b984c2d1e4a83838c1421832df7be0e7ce24639f34df6e412359ea3
+  spec_digest: 79008561bab93eb203f776f146e1586c29cdef86ab09083a967b21edbec2f9ff
+  verification_digest: 18a327d5e5242705e37351e1a019e1b4064276abdb74b6d9d9b5cb6d9f0a49f3
   deviations:
     - spec_ref: spec v4 D1-D8 / RULE-01-13
       actual: "実装は spec v4 と逐条一致（sol run 4b: [18][19][20][22][23][24] 解消。[21] は
@@ -109,15 +118,16 @@ spec_consensus:
       action: accept
       status: resolved
       rationale: 実装が spec より弱い箇所は無し。強い側の差（禁止 env の追加）は intent を弱めないので intent は不変
-      evidence_ref: ~/ai_bus/logs/tp-sol-review-run4b-*.last.md, pytest 58 passed
+      evidence_ref: ~/ai_bus/logs/tp-sol-review-run4b-*.last.md, pytest 68 passed
   reviewer_ack:
     reviewer_kind: independent_agent
-    reviewer_id: copilot-pull-request-reviewer+codex-sol-run4b-2026-09-23
-    acked_at: 2026-09-23T08:21:13.824Z
-    spec_sha256: 4b1d163352d1f5475582989f4baab96ba3b3fcab112f372f4819c4d218d38203
-    verification_sha256: 5997570f5b984c2d1e4a83838c1421832df7be0e7ce24639f34df6e412359ea3
-    note: "PR #14 Copilot review 3 件（High/Medium/Low）を v5 で反映: step 契約
-      lint（RULE-15）、asset 集合検証（RULE-14）、RULE-11 の外部要因/source 起因の分離。tests 63"
+    reviewer_id: copilot-review-5288468185+codex-terra-medium-2026-09-23
+    acked_at: 2026-09-23T08:25:01.791Z
+    spec_sha256: 79008561bab93eb203f776f146e1586c29cdef86ab09083a967b21edbec2f9ff
+    verification_sha256: 18a327d5e5242705e37351e1a019e1b4064276abdb74b6d9d9b5cb6d9f0a49f3
+    note: "PR #14 Copilot 3 件 + terra 5 件を v5 で反映: step
+      契約を正規化後スクリプト全文の完全一致に（RULE-15）、asset 集合検証の bash
+      を配列・引用付き比較に（RULE-14）、RULE-11 分離。tests 68"
 success_criteria_matrix:
   - criterion: "tag push だけが publish を起動する: release workflow のトリガーは v<version> 形式の
       tag push と workflow_dispatch の 2 つだけで、main への push や pull_request
