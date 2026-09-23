@@ -90,6 +90,38 @@ EXPECTED_ARTIFACT_STEPS = {
     PUBLISH_JOB: [("download", "release-dist", "dist/")],
     RELEASE_JOB: [("download", "release-dist", "dist/"), ("download", "release-checksums", "checksums/")],
 }
+# Full step contract per job, in order. Every step is either an allowlisted `uses`
+# ({"uses": ...}) or a named `run` step whose script must contain the listed markers
+# and whose `if` must equal the listed value (None = no `if`). Deleting, reordering or
+# hollowing out a run step (e.g. the tag/version check) is a violation (RULE-03 / 05).
+TAG_PUSH_ONLY_IF = "github.event_name == 'push'"
+EXPECTED_STEPS: Dict[str, List[Dict[str, object]]] = {
+    BUILD_JOB: [
+        {"uses": _CHECKOUT},
+        {"uses": _SETUP_PY},
+        {"name": "Install pinned tooling (RULE-12)", "run": ["pip install build==1.6.1 twine==7.0.0 pyyaml==6.0.3 pytest==9.1.1"], "if": None},
+        {"name": "Lint this workflow (RULE-02 / 04 / 05 / 06)", "run": ["release_checks.py workflow-lint .github/workflows/release.yml"], "if": None},
+        {"name": "Guardrail unit tests", "run": ["python -m pytest -q .github/scripts"], "if": None},
+        {"name": "Lint release docs (RULE-10 / 11)", "run": ["release_checks.py docs-lint --release-doc docs/release.md --readme README.md"], "if": None},
+        {"name": "Tag must match pyproject version (RULE-03; tag pushes only)", "run": ['release_checks.py version --tag "$GITHUB_REF_NAME"'], "if": TAG_PUSH_ONLY_IF},
+        {"name": "Build sdist and wheel", "run": ["python -m build"], "if": None},
+        {"name": "twine check", "run": ["python -m twine check --strict dist/*"], "if": None},
+        {"name": "Exactly one wheel and one sdist (RULE-05)", "run": ['test "$(ls dist/*.whl | wc -l)" -eq 1', 'test "$(ls dist/*.tar.gz | wc -l)" -eq 1', 'test "$(ls dist | wc -l)" -eq 2'], "if": None},
+        {"name": "Write SHA256SUMS (outside dist/ so publish only sees distributions)", "run": ["(cd dist && sha256sum *) > checksums/SHA256SUMS"], "if": None},
+        {"uses": _UPLOAD},
+        {"uses": _UPLOAD},
+    ],
+    PUBLISH_JOB: [
+        {"uses": _DOWNLOAD},
+        {"uses": _PYPA},
+    ],
+    RELEASE_JOB: [
+        {"uses": _DOWNLOAD},
+        {"uses": _DOWNLOAD},
+        {"name": "Create the release if missing, then attach the exact published files", "run": ['gh release create "$TAG" --verify-tag', 'gh release upload "$TAG" dist/*.whl dist/*.tar.gz checksums/SHA256SUMS --clobber'], "if": None},
+        {"name": "Verify the release carries exactly wheel, sdist and SHA256SUMS (RULE-07)", "run": ['gh release view "$TAG" --json assets', "SHA256SUMS"], "if": None},
+    ],
+}
 
 # --- verify-pypi contract (RULE-07) -------------------------------------------
 SUMS_LINE_RE = re.compile(r"^([0-9a-f]{64})\s+\*?(\S+)\s*$")
@@ -255,6 +287,30 @@ def lint_workflow(path: Path) -> None:
                 artifact_steps.append(("download", str(w.get("name")), str(w.get("path"))))
         if str(job_name) in EXPECTED_ARTIFACT_STEPS and artifact_steps != EXPECTED_ARTIFACT_STEPS[str(job_name)]:
             reasons.append(f"job {job_name!r}: artifact steps must be exactly {EXPECTED_ARTIFACT_STEPS[str(job_name)]}, got {artifact_steps} (RULE-05)")
+        contract = EXPECTED_STEPS.get(str(job_name))
+        if contract is not None:
+            if len(steps) != len(contract):
+                reasons.append(f"job {job_name!r}: expected {len(contract)} steps, got {len(steps)} (D1 step contract)")
+            for idx, (step, want) in enumerate(zip(steps, contract)):
+                label = f"job {job_name!r} step {idx + 1}"
+                if not isinstance(step, dict):
+                    reasons.append(f"{label}: not a mapping")
+                    continue
+                if "uses" in want:
+                    if str(step.get("uses")) != want["uses"]:
+                        reasons.append(f"{label}: expected uses {want['uses']!r}, got {step.get('uses')!r} (D1 step contract)")
+                    continue
+                if step.get("name") != want["name"]:
+                    reasons.append(f"{label}: expected run step {want['name']!r}, got {step.get('name')!r} (D1 step contract)")
+                    continue
+                run_text = str(step.get("run", ""))
+                for marker in want["run"]:  # type: ignore[union-attr]
+                    if str(marker) not in run_text:
+                        reasons.append(f"{label} ({want['name']}): run script must contain {marker!r} (D1 step contract)")
+                cond = step.get("if")
+                cond_norm = None if cond is None else " ".join(str(cond).split())
+                if cond_norm != want["if"]:
+                    reasons.append(f"{label} ({want['name']}): if must be {want['if']!r}, got {cond_norm!r} (D1 step contract)")
         for idx, step in enumerate(steps):
             if not isinstance(step, dict):
                 continue

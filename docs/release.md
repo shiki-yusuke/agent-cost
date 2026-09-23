@@ -60,8 +60,9 @@ Which operation is safe depends on how far the run got:
 
 | State | Safe action |
 |---|---|
-| `build` failed, or `publish` failed (nothing on PyPI) | Fix, merge, and push a **new** patch version tag. Re-running the same run is harmless but pointless. |
-| `publish` succeeded, `github-release` failed | Use **Re-run failed jobs** on the run. `publish` is not re-executed and the artifacts of that run are reused. If that fails too: `gh run download <run-id>` and `gh release upload v<version> <files> --clobber` by hand. |
+| `build` or `publish` failed for an **external, retryable** reason and nothing is on PyPI (Trusted Publisher not yet registered, PyPI outage, runner hiccup) | Fix the external cause (e.g. finish the one-time setup), then **Re-run failed jobs** on the same run. The source and the tag are unchanged, so no new version is needed. |
+| `build` or `publish` failed because the **source** is wrong (tag/version mismatch, packaging error) and nothing is on PyPI | Fix, merge, and push a **new** patch version tag. Never move or recreate the existing tag. |
+| `publish` succeeded, `github-release` failed | Use **Re-run failed jobs** on the run. `publish` is not re-executed and the artifacts of that run are reused. If that fails too: `gh run download <run-id>` and `gh release upload v<version> <files> --clobber` by hand. If the asset-set check fails because a pre-created release carries an unrelated asset, delete that asset on GitHub and re-run the failed job. |
 | Everything succeeded but the release is defective | Yank the version on PyPI and release a new patch version. |
 
 Forbidden, because PyPI rejects re-uploading an existing filename and the run

@@ -1,6 +1,8 @@
-# agent-cost: PyPI Trusted Publisher への切替 — spec (v4)
+# agent-cost: PyPI Trusted Publisher への切替 — spec (v5)
 
-**intent**: `I-2026-09-23-agent-cost-pypi-trusted-publisher` / **状態**: Phase 1（spec 起草）v4
+**intent**: `I-2026-09-23-agent-cost-pypi-trusted-publisher` / **状態**: Phase 4（PR #14 レビュー対応）v5
+
+**v5 改訂の理由（PR #14 Copilot review、2026-09-23）**: (1) High — lint が `uses` step の列しか比較せず、`run` step（特に RULE-03 の tag/version 検証）を削除・空洞化しても通る → 3 job の全 step を name / run マーカー / if で完全一致検査する step 契約を D1 と lint (j) に追加、否定 fixture 5 件（version 検証 step の削除・空洞化・`if` 除去、twine check の no-op 化、asset 検証 step の差し替え）。(2) Medium — `gh release upload --clobber` は同名 asset を置換するだけで、人間が事前作成した Release の余剰 asset を消さない → github-release job の末尾に asset 集合の完全一致検証 step を追加（不一致は exit 1、余剰の削除は人間）。(3) Low — 「publish 失敗は新 version」は外部要因（Trusted Publisher 未登録・PyPI 障害）の再試行を不当に禁じる → RULE-11 / D8 / docs を「外部要因は同 run の Re-run failed jobs、source 起因は新 version」に分離。
 
 **v4 改訂の理由**: architect（sol、run 3 = spec v3 差分 + 実装レビュー）が未解消 1 件（B7: intent の三者一致文言が旧定義）と lint のすり抜け経路 3 件（B19 `secrets['X']` の index 構文、B20 `permissions: write-all` が空扱い、B21 余分な job / `needs` の拡張 / 別 action 名 + 同 SHA / job-level reusable workflow）、SHOULD 3 件（S22 否定 fixture の網羅、S23 `true:` キーによる `on:` 偽装、S24 docs の『maintainer machine にも無い』は D8 と不整合）、NIT 1 件（.DS_Store）を報告。v4 は次を反映した: intent success 3 を『配布物 + SHA256SUMS 自体』に修正（B18）/ secrets は `${{ }}` 式単位で `secrets.GITHUB_TOKEN` 完全一致のみ許可（B19）/ permissions は mapping かつ job ごとの完全一致（top-level `{contents: read}`、build は宣言禁止、publish `{id-token: write, contents: read}`、github-release `{contents: write}`）（B20）/ jobs 集合・needs・uses（owner/repo@SHA の allowlist 5 件）・artifact 名と path を完全一致で検査、job-level uses 禁止（B21）/ `attestations` を false にする構成を拒否（RULE-08 を lint 化）/ `on:` は raw の `^on:` 行を必須にし boolean キーを拒否（S23）/ 否定 fixture 13 件追加（S22）/ docs の文言修正（S24）。
 **declared_risk**: medium（publish 経路という共有契約に触れる。CI ファイルの追加のみで Python コードは不変）
@@ -40,7 +42,9 @@
 |---|---|---|---|
 | `build` | 常に（tag push / dispatch） | `contents: read` | checkout → setup-python 3.12 → `python -m pip install --upgrade pip` → `python -m pip install build==1.6.1 twine==7.0.0 pyyaml==6.0.3 pytest==9.1.1` → `python .github/scripts/release_checks.py workflow-lint .github/workflows/release.yml` → `python -m pytest -q .github/scripts` → `release_checks.py docs-lint --release-doc docs/release.md --readme README.md` → tag event のみ `release_checks.py version --tag "$GITHUB_REF_NAME"` → `python -m build`（出力 `dist/`）→ `twine check --strict dist/*` → `dist/` に `*.whl` と `*.tar.gz` が各 1 件だけあることを検査 → `mkdir checksums && (cd dist && sha256sum *) > checksums/SHA256SUMS` → `upload-artifact`（name `release-dist`、path `dist/`）と `upload-artifact`（name `release-checksums`、path `checksums/SHA256SUMS`） |
 | `publish` | `needs: build` かつ `github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')` | `id-token: write`（contents は read） | `environment: pypi` → `download-artifact`（`release-dist` → `dist/`）→ `pypa/gh-action-pypi-publish`（`packages-dir: dist/`）。**`dist/` には配布物 2 件しか無い**（checksum は別 artifact）ので非配布物による twine 検査失敗は起きない |
-| `github-release` | `needs: publish` かつ同条件 | `contents: write` | job `env`: `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`（`gh` の認証。workflow 自身のトークンのみ、RULE-13）、`GH_REPO: ${{ github.repository }}`（checkout 不要）、`TAG: ${{ github.ref_name }}` → `download-artifact` ×2 → `gh release view "$TAG"` が無ければ `gh release create "$TAG" --verify-tag --title "$TAG" --notes "See CHANGELOG.md for $TAG"` → `gh release upload "$TAG" dist/*.whl dist/*.tar.gz checksums/SHA256SUMS --clobber` |
+| `github-release` | `needs: publish` かつ同条件 | `contents: write` | job `env`: `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`（`gh` の認証。workflow 自身のトークンのみ、RULE-13）、`GH_REPO: ${{ github.repository }}`（checkout 不要）、`TAG: ${{ github.ref_name }}` → `download-artifact` ×2 → `gh release view "$TAG"` が無ければ `gh release create "$TAG" --verify-tag --title "$TAG" --notes "See CHANGELOG.md for $TAG"` → `gh release upload "$TAG" dist/*.whl dist/*.tar.gz checksums/SHA256SUMS --clobber` → **asset 集合の検証**（v5、Copilot #2）: `gh release view --json assets` の name 集合が `{wheel, sdist, SHA256SUMS}` と完全一致しなければ exit 1（`--clobber` は同名を置換するだけで、人間が事前作成した Release の余剰 asset を消さないため。余剰の削除は人間） |
+
+**step 契約（v5、Copilot #1）**: 3 job の全 step は上の列と**順序・個数・種別で完全一致**する。`uses` step は D3 の allowlist 文字列、`run` step は `name` の完全一致 + run スクリプトに含まれるべきマーカー（例: `release_checks.py version --tag "$GITHUB_REF_NAME"`、`python -m twine check --strict dist/*`）+ `if` の完全一致（version 検証 step のみ `github.event_name == 'push'`、他は `if` 無し）で検査する（RULE-03 / 05 / 12、lint (j)）。`uses` 列だけの比較では run step（特に version 検証）を削除・空洞化しても lint が通るため。
 
 - `concurrency: { group: release-${{ github.ref }}, cancel-in-progress: false }`。同 ref の同時実行を防ぐ（GitHub の仕様で pending は 1 件に置換されるため「すべて直列化」ではない。同 tag の run が並ぶ状況自体を RULE-11 で禁止する）。
 - publish と github-release は build の artifact だけを使い、再 build しない（RULE-05）。
@@ -89,7 +93,7 @@ PyPI の `https://pypi.org/manage/project/coding-agent-cost/settings/publishing/
 `docs/release.md`:
 1. 通常: `pyproject.toml` と `CHANGELOG.md` を bump する PR → merge → `git tag v<x> && git push origin v<x>` → Actions の run を確認 → `gh release download v<x> -D assets/` → `release_checks.py verify-pypi --version <x> --sums assets/SHA256SUMS --assets-dir assets/` が exit 0 → Release notes を CHANGELOG から補完（任意）。
 2. dispatch ドライランは build のみで、version 一致は検証しない（D2）。
-3. **回復（RULE-11）**: (a) build 失敗 / publish 失敗（PyPI 未公開）→ 修正 commit → **新しい** patch version で tag（同 tag の再利用と `git tag -f` は禁止）。(b) PyPI 公開済みだが github-release 失敗 → Actions の **「Re-run failed jobs」**（publish は成功済みなので走らない、artifact は retention 内で残る）。それも失敗なら run の artifact を `gh run download` して `gh release upload --clobber` で手動添付。**同 tag の全 job 再実行は禁止**（PyPI が同 filename を拒否して publish が fail する）。(c) 公開後に欠陥 → PyPI で yank → patch version で再リリース。
+3. **回復（RULE-11）**: (a-1) build / publish が**外部要因**（Trusted Publisher 未登録、PyPI 障害、runner 不調）で失敗し PyPI 未公開 → 外部要因を解消して**同 run の「Re-run failed jobs」**（source も tag も不変なので新 version は不要。v5、Copilot #3）。(a-2) **source 起因**（tag / version 不一致、packaging 誤り）で失敗し PyPI 未公開 → 修正 commit → **新しい** patch version で tag（同 tag の再利用と `git tag -f` は禁止）。(b) PyPI 公開済みだが github-release 失敗 → Actions の **「Re-run failed jobs」**（publish は成功済みなので走らない、artifact は retention 内で残る）。それも失敗なら run の artifact を `gh run download` して `gh release upload --clobber` で手動添付。**同 tag の全 job 再実行は禁止**（PyPI が同 filename を拒否して publish が fail する）。(c) 公開後に欠陥 → PyPI で yank → patch version で再リリース。
 4. `~/.pypirc` と手元の twine は不要（削除は人間判断）。
 
 README は「PyPI distribution」節の末尾に「Release procedure: see docs/release.md」を 1 行追加するだけ（既存 README に publish 手順は無い）。
@@ -157,7 +161,9 @@ pypa action の内部挙動の変更、GitHub 側 OIDC claim 仕様変更、PyPI
 - **RULE-08** attestations は action の既定（true）に従い、明示的に無効化しない。workflow-lint は pypa step の `attestations` が無指定または `true` 以外なら exit 1。
 - **RULE-09** `.github/workflows/ci.yml` は本 lane で 1 バイトも変更しない。
 - **RULE-10** docs/release.md と README に `~/.pypirc` / `twine upload` を publish 手順として書かない（「不要になった」と述べる文は可）。
-- **RULE-11** PyPI 公開後の回復は「失敗 job のみ再実行」または「同 run の artifact を手動添付」に限る。PyPI 公開後の同 tag の全 job 再実行、tag の内容を変える再利用（削除して再作成、`git tag -f`）は禁止と docs/release.md に明記する。未公開（S0）の同一 run の再実行は内容不変なので可。
+- **RULE-11** PyPI 公開後の回復は「失敗 job のみ再実行」または「同 run の artifact を手動添付」に限る。PyPI 公開後の同 tag の全 job 再実行、tag の内容を変える再利用（削除して再作成、`git tag -f`）は禁止と docs/release.md に明記する。未公開（S0）で失敗が外部要因なら同一 run の「Re-run failed jobs」で回復し新 version は不要、source 起因なら新 patch version で tag する（v5）。
+- **RULE-14**（v5）github-release job は添付後に Release の asset 名集合を取得し、`{wheel, sdist, SHA256SUMS}` と完全一致しなければ exit 1 とする。余剰 asset の削除は自動で行わない（人間）。
+- **RULE-15**（v5）workflow-lint は 3 job の全 step を D1 の step 契約（順序・個数・`uses` 文字列・`run` step の name とマーカーと `if`）と完全一致で検査する。
 - **RULE-12** build job は `build==1.6.1`、`twine==7.0.0`、`pyyaml==6.0.3`、`pytest==9.1.1` を明示 install し、`python -m pytest -q .github/scripts` を build の中で実行する（clean runner の前提。版の更新は spec 改訂事項）。
 - **RULE-13** github-release job は `gh` の認証に workflow 自身の `GITHUB_TOKEN`（`${{ secrets.GITHUB_TOKEN }}` または `${{ github.token }}`）だけを `env.GH_TOKEN` で供給する。workflow-lint は違反で exit 1。
 

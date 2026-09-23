@@ -121,6 +121,16 @@ def test_02_real_workflow_passes_lint(capsys):
         ("          name: release-dist\n          path: dist/\n      # No API token", "          name: release-dist\n          path: pkgs/\n      # No API token", "artifact steps must be exactly"),
         # RULE-05: github-release downloads the checksums into the wrong place.
         ("          name: release-checksums\n          path: checksums/\n", "          name: release-checksums\n          path: dist/\n", "artifact steps must be exactly"),
+        # RULE-03: the tag/version check step deleted (Copilot #1) -- every uses step still matches.
+        ("      - name: Tag must match pyproject version (RULE-03; tag pushes only)\n        if: github.event_name == 'push'\n        run: python .github/scripts/release_checks.py version --tag \"$GITHUB_REF_NAME\"\n", "", "expected 13 steps"),
+        # RULE-03: the version check kept in place but hollowed out.
+        ("        run: python .github/scripts/release_checks.py version --tag \"$GITHUB_REF_NAME\"", "        run: echo skip", "run script must contain"),
+        # RULE-03: the version check's `if` removed (would now run on dispatch, hiding the contract).
+        ("      - name: Tag must match pyproject version (RULE-03; tag pushes only)\n        if: github.event_name == 'push'\n", "      - name: Tag must match pyproject version (RULE-03; tag pushes only)\n", "if must be"),
+        # RULE-12: twine check step replaced by a no-op with the same name.
+        ("        run: python -m twine check --strict dist/*", "        run: true", "run script must contain"),
+        # RULE-07: the remote asset-set check deleted (Copilot #2).
+        ("      - name: Verify the release carries exactly wheel, sdist and SHA256SUMS (RULE-07)\n", "      - name: Something else\n", "expected run step"),
     ],
 )
 def test_02_mutated_workflow_fails_lint(tmp_path, capsys, old, new, expect):

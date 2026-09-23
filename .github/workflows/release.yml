@@ -119,3 +119,18 @@ jobs:
             gh release create "$TAG" --verify-tag --title "$TAG" --notes "See CHANGELOG.md for $TAG."
           fi
           gh release upload "$TAG" dist/*.whl dist/*.tar.gz checksums/SHA256SUMS --clobber
+      # --clobber only replaces same-named assets; it never removes an unrelated asset that a
+      # human attached to a pre-created release. Fail closed if the remote set is not exactly
+      # the three files we just verified locally (the maintainer removes extras by hand).
+      - name: Verify the release carries exactly wheel, sdist and SHA256SUMS (RULE-07)
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(cd dist && ls *.whl *.tar.gz; echo SHA256SUMS)"
+          actual="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          if [ "$(printf '%s\n' $expected | sort)" != "$(printf '%s\n' $actual | sort)" ]; then
+            echo "release $TAG asset set differs from the published files:" >&2
+            echo "expected: $expected" >&2
+            echo "actual:   $actual" >&2
+            exit 1
+          fi
