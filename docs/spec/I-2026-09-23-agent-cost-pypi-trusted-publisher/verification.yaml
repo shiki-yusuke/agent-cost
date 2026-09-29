@@ -97,18 +97,26 @@ manual_verification:
     description: PR merge 後、Actions から release workflow を workflow_dispatch
       で実行し、build が green、publish と github-release が skipped であることを run URL
       とともに記録する
-    expected_status: pending（PR merge 後、人間）
+    expected_status: "done 2026-09-23（人間が dispatch、確認 2026-09-29: run 35837246585 =
+      Build and check success / Publish to PyPI skipped / Attach assets
+      skipped、https://github.com/shiki-yusuke/agent-cost/actions/runs/358372465\
+      85）"
   - id: TEST-07
     description: 次の実リリース（tag push は人間）で publish 成功・Release assets 3 件・verify-pypi
       --assets-dir exit 0 を記録する。これが済むまで 5_done にしない
-    expected_status: pending（次の実リリース、人間）
+    expected_status: done 2026-09-29（tag v0.2.2 = f9afb59 を人間が push、run 36510092803
+      = build / publish / github-release すべて success。PyPI coding-agent-cost
+      0.2.2 の whl c6632103… / sdist f8e1cd2e… と Release assets 3 件（whl / sdist /
+      SHA256SUMS）と SHA256SUMS が三者一致、verify-pypi --version 0.2.2 --sums
+      --assets-dir exit
+      0、https://github.com/shiki-yusuke/agent-cost/actions/runs/36510092803）
 goal_stopping_condition:
   - success_criteria_matrix 全行が covered_by none 以外
   - TEST-06 と TEST-07 が manual_verification に記録されるまで lane を 5_done にしない
 spec_consensus:
   spec_ssot_ref: docs/spec/I-2026-09-23-agent-cost-pypi-trusted-publisher/spec.md
   spec_digest: 79008561bab93eb203f776f146e1586c29cdef86ab09083a967b21edbec2f9ff
-  verification_digest: 18a327d5e5242705e37351e1a019e1b4064276abdb74b6d9d9b5cb6d9f0a49f3
+  verification_digest: a46bef63526649dfc9806ccd6de78316de6a33f2b7587d69b01a3a570fcc04cb
   deviations:
     - spec_ref: spec v4 D1-D8 / RULE-01-13
       actual: "実装は spec v4 と逐条一致（sol run 4b: [18][19][20][22][23][24] 解消。[21] は
@@ -120,14 +128,15 @@ spec_consensus:
       rationale: 実装が spec より弱い箇所は無し。強い側の差（禁止 env の追加）は intent を弱めないので intent は不変
       evidence_ref: ~/ai_bus/logs/tp-sol-review-run4b-*.last.md, pytest 68 passed
   reviewer_ack:
-    reviewer_kind: independent_agent
-    reviewer_id: copilot-review-5288468185+codex-terra-medium-2026-09-23
-    acked_at: 2026-09-23T08:25:01.791Z
+    reviewer_kind: human
+    reviewer_id: shiki-yusuke+claude-fable-5-1-closeout-2026-09-29
+    acked_at: 2026-09-29T01:58:11.434Z
     spec_sha256: 79008561bab93eb203f776f146e1586c29cdef86ab09083a967b21edbec2f9ff
-    verification_sha256: 18a327d5e5242705e37351e1a019e1b4064276abdb74b6d9d9b5cb6d9f0a49f3
-    note: "PR #14 Copilot 3 件 + terra 5 件を v5 で反映: step
-      契約を正規化後スクリプト全文の完全一致に（RULE-15）、asset 集合検証の bash
-      を配列・引用付き比較に（RULE-14）、RULE-11 分離。tests 68"
+    verification_sha256: a46bef63526649dfc9806ccd6de78316de6a33f2b7587d69b01a3a570fcc04cb
+    note: "TEST-06（dispatch run 35837246585: build success / publish・github-release
+      skipped）と TEST-07（tag v0.2.2 run 36510092803: PyPI 0.2.2 と Release assets
+      3 件と SHA256SUMS が三者一致、verify-pypi exit 0）を manual_verification
+      に記録。dispatch と tag push は人間、確認は Claude"
 success_criteria_matrix:
   - criterion: "tag push だけが publish を起動する: release workflow のトリガーは v<version> 形式の
       tag push と workflow_dispatch の 2 つだけで、main への push や pull_request
