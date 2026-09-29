@@ -316,7 +316,7 @@ agent-cost measure --session-id <id> [--session-id <id> ...] \
 ```json
 {
   "protocol_version": "measure/v1",
-  "producer_version": "0.2.1",
+  "producer_version": "0.2.2",
   "accounting_basis": "agent-cost-raw-total/v2",
   "generated_at": "...",
   "window": { "since": "...", "until": null },

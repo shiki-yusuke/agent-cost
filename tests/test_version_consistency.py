@@ -1,6 +1,6 @@
 """Spec: pyproject.toml's [project].version and agent_cost.__version__ must
-agree, and both must read "0.2.1" for this change (the Opus 5.5 catalog release bumps the package
-version alongside the measure/v1 data_quality additions). A broken
+agree, and both must read "0.2.2" for this change (the Sonnet 5.5 catalog-only release bumps
+the package version, as the Opus 5.5 catalog release did for 0.2.1). A broken
 implementation would bump one file but not the other, or forget the bump
 entirely.
 
@@ -29,5 +29,5 @@ def test_pyproject_version_matches_package_version():
 
 
 def test_version_is_0_2_0():
-    assert agent_cost.__version__ == "0.2.1"
-    assert _pyproject_version() == "0.2.1"
+    assert agent_cost.__version__ == "0.2.2"
+    assert _pyproject_version() == "0.2.2"

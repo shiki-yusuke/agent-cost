@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.2
+
+Catalog-only release: no reader or aggregation logic changes. Reports
+computed with 0.2.1 differ only for `claude-sonnet-5-5` rows (now priced).
+
+### Added
+
+- `claude-sonnet-5-5` rate entry (catalog_version `2026-09-29`): $2 / $0.20 /
+  $2.50 / $4 / $10 per MTok, fast multiplier 1.0, effective from the public
+  launch date 2026-09-28. Claude Code's 2.1.284 changelog entry makes Sonnet
+  5.5 the default Sonnet model (the `sonnet` alias in agent frontmatter now
+  resolves to it), so rows whose raw model ID is `claude-sonnet-5-5` would
+  otherwise have been reported as `unpriced`. The values equal
+  `claude-sonnet-5`'s ongoing values, but the model is a separate entry, not
+  an alias: the pricing page lists the two rows independently. `cache_read`
+  is the standard 0.1x for this model (no pricing-page footnote), unlike
+  `claude-opus-5-5`'s 0.05x.
+
 ## 0.2.1
 
 Catalog-only release: no reader or aggregation logic changes. Reports
