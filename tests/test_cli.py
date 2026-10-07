@@ -471,6 +471,7 @@ def test_measure_unknown_session_id_exits_zero_with_empty_result(tmp_path, monke
         "ok": 0,
         "first_event_delta": 0,
         "identity_missing": 0,
+        "output_lower_bound": 0,
     }
 
 

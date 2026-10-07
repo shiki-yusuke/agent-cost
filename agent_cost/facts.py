@@ -32,10 +32,14 @@ MODES = ("fast", "normal", "unknown")
 # (e.g. Codex's first delta in a rollout is measured against an assumed
 # zero baseline; Claude's reader can't dedup a row that lacks a full
 # (message.id, requestId) pair, so it emits that row individually and
-# flags it "identity_missing" rather than silently treating it as "ok").
+# flags it "identity_missing" rather than silently treating it as "ok";
+# "output_lower_bound" marks a Claude output fact whose tokens are only the
+# observed lower bound of that message's output_tokens -- the reader's
+# adopted row had no stop_reason, so the value is not guaranteed to be
+# >= the true count).
 # This is never left unset -- every Fact defaults to "ok" so export never
 # emits a null source_quality.
-SOURCE_QUALITY_VALUES = ("ok", "first_event_delta", "identity_missing")
+SOURCE_QUALITY_VALUES = ("ok", "first_event_delta", "identity_missing", "output_lower_bound")
 
 _BRACKET_SUFFIX = re.compile(r"\[[^\]]*\]$")
 _DATE_SUFFIX = re.compile(r"@\d{6,8}$")

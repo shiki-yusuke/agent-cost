@@ -278,6 +278,14 @@ def _resolve_mode(rows: list, adopted: dict) -> str:
     return adopted["mode"]
 
 
+def _is_final(row: dict) -> bool:
+    """Whether a row carries a real ``message.stop_reason`` -- a non-empty
+    ``str``. Null, missing, ``False``, ``""`` and non-string values all
+    fail to qualify."""
+    stop_reason = row["stop_reason"]
+    return isinstance(stop_reason, str) and bool(stop_reason)
+
+
 def _select_adopted_row(rows: list) -> dict:
     """Pick the row within one dedup group whose usage gets emitted.
 
@@ -302,8 +310,7 @@ def _select_adopted_row(rows: list) -> dict:
     """
     adopted_idx = None
     for idx in range(len(rows) - 1, -1, -1):
-        stop_reason = rows[idx]["stop_reason"]
-        if isinstance(stop_reason, str) and stop_reason:
+        if _is_final(rows[idx]):
             adopted_idx = idx
             break
 
@@ -365,6 +372,19 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
     the adopted row: if the adopted row's own mode is ``"unknown"`` but
     the group has exactly one concrete mode elsewhere, that concrete mode
     is emitted instead (see its docstring).
+
+    If the adopted row itself is not final (no non-empty-string
+    ``stop_reason`` -- see ``_is_final``), the group's ``output`` fact gets
+    ``source_quality="output_lower_bound"``: that row's ``output_tokens``
+    is a streaming head's value, observed to be a lower bound on the
+    message's real output count (subagent transcripts often end a
+    tool_use message without ever writing its final row). This keys off
+    the *adopted* row, not "does the group contain a final row", so a
+    final row overridden by a later, differing non-final row is flagged
+    too. The group's input-side facts stay ``"ok"`` (those fields don't
+    grow while streaming), and token amounts are emitted unchanged --
+    this only marks the caveat. Identity-missing rows never form a group
+    and keep ``"identity_missing"``.
 
     ``occurred_at_utc`` on the emitted fact is the *adopted* row's own
     timestamp (not the group's first-seen timestamp): the adopted row is
@@ -493,6 +513,7 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
         if marker in standalone_rows:
             row = standalone_rows[marker]
             source_quality = "identity_missing"
+            output_source_quality = source_quality
             dedup_units.append(
                 ClaudeDedupUnit(
                     session_id=row["sid"],
@@ -544,6 +565,7 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
                 "tokens": adopted["tokens"],
             }
             source_quality = "ok"
+            output_source_quality = "ok" if _is_final(adopted) else "output_lower_bound"
 
         model_key = normalize_model_key(row["model_raw"])
         for kind, amount in row["tokens"].items():
@@ -557,7 +579,7 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
                     token_kind=kind,
                     tokens=amount,
                     mode=row["mode"],
-                    source_quality=source_quality,
+                    source_quality=output_source_quality if kind == "output" else source_quality,
                 )
             )
 
