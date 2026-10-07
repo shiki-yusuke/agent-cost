@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.0
+
+Reader flag-only release: no token amount, dedup adoption or conflict
+counting changes. Reports computed with 0.2.2 have the same rows and totals;
+only some Claude `output` facts' `source_quality` changes from `"ok"` to the
+new value below.
+
+### Added
+
+- `source_quality` value `"output_lower_bound"` (appended to
+  `SOURCE_QUALITY_VALUES`): the fact's tokens are the observed lower bound of
+  that message's `output_tokens`, not guaranteed to be >= the true count. The
+  Claude reader sets it on a dedup group's `output` fact when the row it
+  adopts has no valid `stop_reason` (a non-empty string) -- including a final
+  row overridden by a later, differing non-final row. In Claude Code subagent
+  transcripts roughly 35% of messages ending in `tool_use` never write their
+  final line, so the adopted row's `output_tokens` is the streaming head's
+  value; top-level transcripts showed no such groups in a 2026-10-07 check.
+  Input-side facts from the same group stay `"ok"`, identity-missing rows
+  stay `"identity_missing"`, and the Codex reader is unchanged.
+- `measure`'s `data_quality.source_quality` now always carries an
+  `output_lower_bound` key (0 when absent), like every other value.
+
+### Upgrade notes
+
+- A downstream consumer that validates `source_quality` (in `export` JSONL or
+  `measure`'s `data_quality.source_quality`) against a fixed enum must add
+  `"output_lower_bound"`.
+
 ## 0.2.2
 
 Catalog-only release: no reader or aggregation logic changes. Reports

@@ -206,6 +206,14 @@ network, never calls `gh`, and never resolves branches or PRs.
   flagged, since the reader's own cross-check of real transcripts found
   exactly that pattern in every observed duplicated group. See
   `CHANGELOG.md`'s 0.2.0 entry.
+  If the row a group adopts has no `stop_reason` (common in subagent
+  transcripts, where a message ending in `tool_use` may never get its final
+  line), its `output_tokens` is only the streaming head's value: the
+  group's `output` fact is flagged `source_quality: "output_lower_bound"`
+  -- the observed lower bound of that message's output tokens, not
+  guaranteed to be >= the true count. The group's input-side facts stay
+  `"ok"`, and the token amount itself is unchanged (still priced and
+  included in rows/totals); the flag is a warning only.
   When Anthropic's prompt-cache TTL breakdown (5-minute vs 1-hour writes) is
   present in the log, it's used; otherwise the cache-write tokens are priced
   at the 5-minute rate as an explicit **lower bound** and flagged
@@ -316,7 +324,7 @@ agent-cost measure --session-id <id> [--session-id <id> ...] \
 ```json
 {
   "protocol_version": "measure/v1",
-  "producer_version": "0.2.2",
+  "producer_version": "0.3.0",
   "accounting_basis": "agent-cost-raw-total/v2",
   "generated_at": "...",
   "window": { "since": "...", "until": null },
@@ -337,7 +345,7 @@ agent-cost measure --session-id <id> [--session-id <id> ...] \
     "duplicate_rows_skipped": 0,
     "conflicting_duplicate_groups": 0,
     "missing_dedup_identity_rows": 0,
-    "source_quality": { "ok": 41, "first_event_delta": 2, "identity_missing": 0 }
+    "source_quality": { "ok": 41, "first_event_delta": 2, "identity_missing": 0, "output_lower_bound": 1 }
   }
 }
 ```
@@ -369,8 +377,9 @@ includes absolute file paths, rollout paths, prompt/message content, or git
 branch names -- only the fields needed to reproduce a cost estimate:
 `occurred_at_utc`, `agent`, `session_id`, `model_raw`, `model_key`,
 `token_kind`, `tokens`, `mode`, and `source_quality` (a fixed-vocabulary
-caveat about how that one fact was derived, e.g. `"ok"` or Codex's
-`"first_event_delta"` -- never null).
+caveat about how that one fact was derived: `"ok"`, Codex's
+`"first_event_delta"`, or Claude's `"identity_missing"` /
+`"output_lower_bound"` -- never null).
 
 ## License
 
