@@ -461,3 +461,30 @@ def test_prompt_tokens_is_none_when_one_row_of_a_streaming_group_is_inconsistent
     assert result.duplicate_rows_skipped == 1
     assert {f.token_kind: f.tokens for f in result.facts} == {"input_nocache": 10, "cache_write_5m": 110000, "output": 10}
     assert all(f.prompt_tokens is None for f in result.facts)
+
+
+def test_prompt_tokens_is_none_when_streaming_group_rows_disagree_on_prompt_length(tmp_path, monkeypatch):
+    """Pins the group rule directly: a non-conflicting group whose rows carry
+    different (non-None) prompt lengths settles on None, not the adopted
+    row's value. After the TTL/negative checks, identical input-side tokens
+    imply identical prompt lengths, so the disagreement is injected by
+    stubbing ``_prompt_tokens`` -- the guard must hold even if that
+    invariant is weakened later."""
+    import agent_cost.readers.claude as claude_reader
+
+    calls = iter([90000, 110000])
+    monkeypatch.setattr(claude_reader, "_prompt_tokens", lambda usage: next(calls))
+
+    jsonl = tmp_path / "p10.jsonl"
+    write_jsonl(
+        jsonl,
+        [
+            _haiku_row("msg-1", "req-1", output=3, stop_reason=None),
+            _haiku_row("msg-1", "req-1", output=10, ts="2026-10-08T00:00:01Z"),
+        ],
+    )
+    result = claude_reader.parse_session_detailed(jsonl)
+    assert result.conflicting_duplicate_groups == 0
+    assert result.duplicate_rows_skipped == 1
+    assert len(result.facts) > 0
+    assert all(f.prompt_tokens is None for f in result.facts)
