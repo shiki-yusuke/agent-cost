@@ -464,3 +464,23 @@ def test_read_codex_facts_skips_missing_rollout_file(tmp_path):
     result = read_codex_facts(db_path, codex_home)
     assert result.skipped_files == 1
     assert result.facts == []
+
+
+def test_codex_facts_have_no_prompt_tokens(tmp_path):
+    # Codex facts are deltas of cumulative totals, not one request each, so
+    # the prompt length of a single request is unknown.
+    rollout = tmp_path / "r-prompt.jsonl"
+    events = [
+        {
+            "type": "event_msg",
+            "timestamp": "2026-06-01T00:01:00Z",
+            "payload": {
+                "type": "token_count",
+                "info": {"total_token_usage": {"input_tokens": 300000, "cached_input_tokens": 200000, "output_tokens": 50, "reasoning_output_tokens": 0}},
+            },
+        },
+    ]
+    rollout.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    facts, _, _ = parse_rollout_facts(rollout, model_raw="gpt-5.5", session_id="t1")
+    assert facts
+    assert all(f.prompt_tokens is None for f in facts)

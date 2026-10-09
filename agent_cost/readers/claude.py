@@ -127,6 +127,32 @@ def _extract_tokens(usage: dict) -> Optional[dict]:
     return tokens
 
 
+def _prompt_tokens(usage: dict) -> Optional[int]:
+    """The request's prompt length -- ``input_tokens`` +
+    ``cache_read_input_tokens`` + ``cache_creation_input_tokens`` (missing
+    counts as 0), the definition the pricing page's long-context tiers use.
+
+    Returns ``None`` when the usage is inconsistent: a ``cache_creation`` TTL
+    breakdown larger than ``cache_creation_input_tokens``, or a negative
+    field. Raises ``TypeError``/``ValueError`` on a field that fails int
+    conversion, which the caller counts as malformed (as for
+    ``_extract_tokens``).
+    """
+    input_tokens = int(usage.get("input_tokens") or 0)
+    cache_read = int(usage.get("cache_read_input_tokens") or 0)
+    cache_creation_total = int(usage.get("cache_creation_input_tokens") or 0)
+    cache_creation = usage.get("cache_creation")
+    if isinstance(cache_creation, dict):
+        breakdown = int(cache_creation.get("ephemeral_5m_input_tokens") or 0) + int(
+            cache_creation.get("ephemeral_1h_input_tokens") or 0
+        )
+        if breakdown > cache_creation_total:
+            return None
+    if input_tokens < 0 or cache_read < 0 or cache_creation_total < 0:
+        return None
+    return input_tokens + cache_read + cache_creation_total
+
+
 def _valid_id(value) -> Optional[str]:
     """Accept only a non-empty ``str`` as a dedup identifier.
 
@@ -476,6 +502,11 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
             if tokens is None:
                 malformed += 1
                 continue
+            try:
+                prompt_tokens = _prompt_tokens(usage)
+            except (TypeError, ValueError):
+                malformed += 1
+                continue
 
             model_raw = message.get("model") or "(unknown)"
             mode = _detect_mode(usage)
@@ -491,6 +522,7 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
                 "sid": sid,
                 "stop_reason": stop_reason,
                 "tokens": tokens,
+                "prompt_tokens": prompt_tokens,
             }
 
             key = (msg_id, req_id) if (msg_id is not None and req_id is not None) else None
@@ -563,6 +595,11 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
                 "mode": _resolve_mode(rows, adopted),
                 "sid": adopted["sid"],
                 "tokens": adopted["tokens"],
+                # A conflicting group's rows disagree (possibly on the input
+                # side), so the adopted row's prompt length isn't a settled
+                # fact: leave it unknown (priced as a lower bound) rather
+                # than pick a tier from it.
+                "prompt_tokens": None if group_conflicting else adopted["prompt_tokens"],
             }
             source_quality = "ok"
             output_source_quality = "ok" if _is_final(adopted) else "output_lower_bound"
@@ -580,6 +617,7 @@ def parse_session_detailed(jsonl_path: Path) -> ClaudeParseResult:
                     tokens=amount,
                     mode=row["mode"],
                     source_quality=output_source_quality if kind == "output" else source_quality,
+                    prompt_tokens=row["prompt_tokens"],
                 )
             )
 

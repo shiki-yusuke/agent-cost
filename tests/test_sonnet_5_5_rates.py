@@ -63,7 +63,7 @@ def test_claude_sonnet_5_5_cache_read_is_standard_multiplier_and_no_fast_mode():
 
 def test_catalog_version_and_sources_record_the_sonnet_5_5_primary_sources():
     catalog = load_rates()
-    assert catalog.catalog_version == "2026-09-29"
+    assert catalog.catalog_version == "2026-10-09"
     urls = {(s.get("url"), s.get("retrieved_at")) for s in catalog.sources}
     assert ("https://platform.claude.com/docs/en/about-claude/pricing", "2026-09-29") in urls
     assert ("https://www.anthropic.com/claude-sonnet-5-5", "2026-09-29") in urls

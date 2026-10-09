@@ -28,6 +28,11 @@ def price_fact(catalog: RateCatalog, fact: Fact) -> Tuple[Optional[Decimal], str
     never at the more expensive 1-hour rate -- and flagged accordingly.
     An unrecognized model or an unpriced token kind for an otherwise-known
     model both return ``(None, "unpriced", None)`` rather than a guess.
+
+    For a period with ``prompt_tiers``, the fact is priced at the tier with
+    the largest ``prompt_tokens_over`` its ``prompt_tokens`` exceeds (the
+    base values when none). A fact whose ``prompt_tokens`` is unknown is
+    priced at the base values -- the cheapest tier -- as a lower bound.
     """
     resolved_key, period = catalog.rate_for(fact.model_key, fact.occurred_at_utc)
     if resolved_key is None or period is None:
@@ -47,7 +52,16 @@ def price_fact(catalog: RateCatalog, fact: Fact) -> Tuple[Optional[Decimal], str
         rate_field = "cache_write_5m"
         lower_bound = True
 
-    rate = period.values.get(rate_field)
+    values = period.values
+    if period.prompt_tiers:
+        if fact.prompt_tokens is None:
+            lower_bound = True
+        else:
+            for tier in period.prompt_tiers:
+                if fact.prompt_tokens > tier.prompt_tokens_over:
+                    values = tier.values
+
+    rate = values.get(rate_field)
     if rate is None:
         return None, "unpriced", None
 

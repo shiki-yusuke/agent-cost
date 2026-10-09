@@ -231,7 +231,7 @@ def test_unsupported_schema_version_raises(tmp_path):
     data = _minimal_catalog(
         [{"model_key": "m1", "aliases": [], "rates": [_rate("r1", "2025-01-01T00:00:00+00:00")]}]
     )
-    data["schema_version"] = "2"
+    data["schema_version"] = "3"
     path = tmp_path / "rates.json"
     path.write_text(__import__("json").dumps(data))
     with pytest.raises(RatesValidationError, match="schema_version"):
@@ -330,3 +330,168 @@ def test_sha256_is_stable_for_same_content(tmp_path):
     c2 = load_rates(path)
     assert c1.sha256 == c2.sha256
     assert len(c1.sha256) == 64
+
+
+# ── prompt_tiers (schema_version "2") ──
+
+_TIER_100K = {
+    "prompt_tokens_over": 100000,
+    "input_nocache": "2.0",
+    "cache_read": "0.2",
+    "cache_write_5m": "2.5",
+    "cache_write_1h": "4.0",
+    "output": "10.0",
+}
+
+
+def _tiered_catalog(tiers, schema_version="2", **rate_overrides):
+    rate = _rate("r1", "2025-01-01T00:00:00+00:00", **rate_overrides)
+    rate["prompt_tiers"] = tiers
+    data = _minimal_catalog([{"model_key": "m1", "aliases": [], "rates": [rate]}])
+    data["schema_version"] = schema_version
+    return data
+
+
+def _write(tmp_path, data):
+    path = tmp_path / "rates.json"
+    path.write_text(__import__("json").dumps(data))
+    return path
+
+
+def test_prompt_tiers_load_under_schema_version_2(tmp_path):
+    path = _write(tmp_path, _tiered_catalog([dict(_TIER_100K)]))
+    catalog = load_rates(path)
+    period = catalog.models["m1"].rates[0]
+    assert len(period.prompt_tiers) == 1
+    assert period.prompt_tiers[0].prompt_tokens_over == 100000
+    assert period.prompt_tiers[0].values["output"] == Decimal("10.0")
+    assert period.values["output"] == Decimal("5.0")
+
+
+def test_schema_version_2_period_without_tiers_has_empty_prompt_tiers(tmp_path):
+    data = _minimal_catalog(
+        [{"model_key": "m1", "aliases": [], "rates": [_rate("r1", "2025-01-01T00:00:00+00:00")]}]
+    )
+    data["schema_version"] = "2"
+    catalog = load_rates(_write(tmp_path, data))
+    assert catalog.models["m1"].rates[0].prompt_tiers == ()
+
+
+def test_schema_version_1_with_prompt_tiers_raises(tmp_path):
+    path = _write(tmp_path, _tiered_catalog([dict(_TIER_100K)], schema_version="1"))
+    with pytest.raises(RatesValidationError, match="prompt_tiers"):
+        load_rates(path)
+
+
+@pytest.mark.parametrize("threshold", [0, -1, True, "100000", 100000.0, None])
+def test_prompt_tier_threshold_must_be_positive_int(tmp_path, threshold):
+    tier = dict(_TIER_100K, prompt_tokens_over=threshold)
+    path = _write(tmp_path, _tiered_catalog([tier]))
+    with pytest.raises(RatesValidationError, match="m1.r1"):
+        load_rates(path)
+
+
+def test_prompt_tier_threshold_missing_raises(tmp_path):
+    tier = dict(_TIER_100K)
+    del tier["prompt_tokens_over"]
+    with pytest.raises(RatesValidationError, match="m1.r1"):
+        load_rates(_write(tmp_path, _tiered_catalog([tier])))
+
+
+def test_prompt_tier_thresholds_descending_raise(tmp_path):
+    tier_200k = dict(_TIER_100K, prompt_tokens_over=200000, output="20.0")
+    path = _write(tmp_path, _tiered_catalog([tier_200k, dict(_TIER_100K)]))
+    with pytest.raises(RatesValidationError, match="m1.r1"):
+        load_rates(path)
+
+
+def test_prompt_tier_thresholds_duplicate_raise(tmp_path):
+    path = _write(tmp_path, _tiered_catalog([dict(_TIER_100K), dict(_TIER_100K)]))
+    with pytest.raises(RatesValidationError, match="m1.r1"):
+        load_rates(path)
+
+
+@pytest.mark.parametrize("tiers", [{"prompt_tokens_over": 100000}, "x", 1])
+def test_prompt_tiers_must_be_a_list(tmp_path, tiers):
+    with pytest.raises(RatesValidationError, match="m1.r1"):
+        load_rates(_write(tmp_path, _tiered_catalog(tiers)))
+
+
+@pytest.mark.parametrize("tier", ["x", 1, None, [100000]])
+def test_prompt_tier_must_be_an_object(tmp_path, tier):
+    with pytest.raises(RatesValidationError, match="m1.r1"):
+        load_rates(_write(tmp_path, _tiered_catalog([tier])))
+
+
+@pytest.mark.parametrize("field_name", ["input_nocache", "cache_read", "cache_write_5m", "cache_write_1h", "output"])
+def test_prompt_tier_rate_field_missing_raises(tmp_path, field_name):
+    tier = dict(_TIER_100K)
+    del tier[field_name]
+    with pytest.raises(RatesValidationError, match="m1.r1"):
+        load_rates(_write(tmp_path, _tiered_catalog([tier])))
+
+
+@pytest.mark.parametrize("field_name", ["input_nocache", "cache_read", "cache_write_5m", "cache_write_1h", "output"])
+def test_prompt_tier_rate_field_null_raises(tmp_path, field_name):
+    tier = dict(_TIER_100K, **{field_name: None})
+    with pytest.raises(RatesValidationError, match="m1.r1"):
+        load_rates(_write(tmp_path, _tiered_catalog([tier])))
+
+
+@pytest.mark.parametrize("field_name", ["input_nocache", "cache_read", "cache_write_5m", "cache_write_1h", "output"])
+def test_base_rate_field_null_raises_when_period_has_prompt_tiers(tmp_path, field_name):
+    data = _tiered_catalog([dict(_TIER_100K)], **{field_name: None})
+    with pytest.raises(RatesValidationError, match="m1.r1"):
+        load_rates(_write(tmp_path, data))
+
+
+@pytest.mark.parametrize("field_name", ["input_nocache", "cache_read", "cache_write_5m", "cache_write_1h", "output"])
+def test_base_rate_field_missing_raises_when_period_has_prompt_tiers(tmp_path, field_name):
+    data = _tiered_catalog([dict(_TIER_100K)])
+    del data["models"][0]["rates"][0][field_name]
+    with pytest.raises(RatesValidationError, match="m1.r1"):
+        load_rates(_write(tmp_path, data))
+
+
+def test_base_rate_field_null_is_still_allowed_without_prompt_tiers(tmp_path):
+    data = _minimal_catalog(
+        [{"model_key": "m1", "aliases": [], "rates": [_rate("r1", "2025-01-01T00:00:00+00:00", cache_write_5m=None)]}]
+    )
+    data["schema_version"] = "2"
+    catalog = load_rates(_write(tmp_path, data))
+    assert catalog.models["m1"].rates[0].values["cache_write_5m"] is None
+
+
+def test_prompt_tier_cheaper_than_base_raises(tmp_path):
+    tier = dict(_TIER_100K, output="4.99")  # base output is 5.0
+    with pytest.raises(RatesValidationError, match="m1.r1"):
+        load_rates(_write(tmp_path, _tiered_catalog([tier])))
+
+
+def test_second_prompt_tier_cheaper_than_first_raises(tmp_path):
+    tier_200k = dict(_TIER_100K, prompt_tokens_over=200000, cache_read="0.19")  # first tier is 0.2
+    with pytest.raises(RatesValidationError, match="m1.r1"):
+        load_rates(_write(tmp_path, _tiered_catalog([dict(_TIER_100K), tier_200k])))
+
+
+def test_prompt_tier_equal_to_base_is_allowed(tmp_path):
+    tier = dict(
+        _TIER_100K,
+        input_nocache="1.0",
+        cache_read="0.1",
+        cache_write_5m="1.25",
+        cache_write_1h="2.0",
+        output="5.0",
+    )
+    catalog = load_rates(_write(tmp_path, _tiered_catalog([tier])))
+    assert len(catalog.models["m1"].rates[0].prompt_tiers) == 1
+
+
+def test_packaged_catalog_only_claude_haiku_5_5_has_prompt_tiers():
+    catalog = load_rates()
+    for model_key, entry in catalog.models.items():
+        for period in entry.rates:
+            if model_key == "claude-haiku-5-5":
+                assert period.prompt_tiers != ()
+            else:
+                assert period.prompt_tiers == (), (model_key, period.rate_id)

@@ -84,6 +84,12 @@ class Fact:
     tokens: int
     mode: str = "unknown"
     source_quality: str = "ok"
+    # The prompt length of the one request that produced this fact (usage's
+    # input_tokens + cache_read_input_tokens + cache_creation_input_tokens).
+    # Used only to pick the tier of a prompt-length-tiered rate. None means
+    # unknown (a Codex fact, or a Claude fact whose usage was inconsistent or
+    # came from a conflicting dedup group).
+    prompt_tokens: Optional[int] = None
 
     def __post_init__(self) -> None:
         if self.agent not in AGENTS:
@@ -96,5 +102,11 @@ class Fact:
             raise ValueError(f"invalid source_quality: {self.source_quality!r}")
         if self.tokens < 0:
             raise ValueError(f"tokens must be >= 0, got {self.tokens}")
+        if self.prompt_tokens is not None and (
+            isinstance(self.prompt_tokens, bool)
+            or not isinstance(self.prompt_tokens, int)
+            or self.prompt_tokens < 0
+        ):
+            raise ValueError(f"prompt_tokens must be None or an int >= 0, got {self.prompt_tokens!r}")
         if self.occurred_at_utc.tzinfo is None:
             raise ValueError("occurred_at_utc must be timezone-aware")

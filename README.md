@@ -218,6 +218,16 @@ network, never calls `gh`, and never resolves branches or PRs.
   present in the log, it's used; otherwise the cache-write tokens are priced
   at the 5-minute rate as an explicit **lower bound** and flagged
   `lower_bound` rather than guessed at the (more expensive) 1-hour rate.
+  Each Claude fact also carries its request's prompt length
+  (`prompt_tokens` = `input_tokens` + `cache_read_input_tokens` +
+  `cache_creation_input_tokens`), used only to pick the tier of a model
+  whose price depends on prompt length (`claude-haiku-5-5`).
+- **Prompt-length tiers need a known prompt length.** A fact whose prompt
+  length is unknown -- every Codex fact (a delta of cumulative totals, not
+  one request), a Claude fact from a conflicting dedup group, or a Claude
+  row whose cache-write TTL breakdown exceeds its `cache_creation_input_tokens`
+  -- is priced at the model's base (cheapest) tier and flagged
+  `lower_bound`. Models without tiers are unaffected.
 - **Codex CLI**: rollout files record a *cumulative* token count after each
   turn; agent-cost turns that into per-turn deltas. Under the Codex token-rate
   tariff used here, cache writes are not added as a separate charge. The current
@@ -276,6 +286,37 @@ change is recorded as a new period rather than overwriting the old one (see
 carries a `catalog_version`, a list of `sources` (the pricing page a rate
 came from), and is validated on load (no duplicate model keys or aliases,
 no negative rates, no overlapping periods for the same model).
+
+A rate period can price by prompt length (catalog `schema_version` `"2"`).
+The period's own five values are the base tier, for prompts up to the first
+threshold; each entry in `prompt_tiers` applies to prompts *strictly over*
+its `prompt_tokens_over`, and a request uses the largest threshold it
+exceeds. Prompt length is the request's input + cache-read + cache-write
+tokens, and the chosen tier prices every token kind of that request,
+output included:
+
+```json
+{
+  "rate_id": "claude-haiku-5-5-launch-2026-10-07",
+  "effective_from": "2026-10-07T00:00:00+00:00",
+  "effective_until": null,
+  "input_nocache": "0.10", "cache_read": "0.01", "cache_write_5m": "0.125", "cache_write_1h": "0.20", "output": "0.50",
+  "prompt_tiers": [
+    { "prompt_tokens_over": 100000,
+      "input_nocache": "0.50", "cache_read": "0.05", "cache_write_5m": "0.625", "cache_write_1h": "1.0", "output": "2.50" }
+  ]
+}
+```
+
+In a period with `prompt_tiers`, all five values of the base and of every
+tier must be present and non-null, thresholds must be positive integers in
+ascending order without duplicates, and every value must be greater than or
+equal to the same value in the previous tier (the base first). That
+monotonicity is what makes the base tier a true lower bound for a fact whose
+prompt length is unknown. A `schema_version` `"1"` catalog may not contain
+`prompt_tiers`; agent-cost 0.3.0 and earlier reject a `"2"` catalog as
+unsupported rather than mispricing it, so a custom `--rates` file that uses
+tiers must declare `"2"`.
 
 To use your own catalog instead of the one bundled with the package, pass
 `--rates path/to/rates.json` to `report` or `export` -- this fully replaces
@@ -376,10 +417,11 @@ agent-cost makes zero network calls. `agent-cost export`'s JSONL never
 includes absolute file paths, rollout paths, prompt/message content, or git
 branch names -- only the fields needed to reproduce a cost estimate:
 `occurred_at_utc`, `agent`, `session_id`, `model_raw`, `model_key`,
-`token_kind`, `tokens`, `mode`, and `source_quality` (a fixed-vocabulary
+`token_kind`, `tokens`, `mode`, `source_quality` (a fixed-vocabulary
 caveat about how that one fact was derived: `"ok"`, Codex's
 `"first_event_delta"`, or Claude's `"identity_missing"` /
-`"output_lower_bound"` -- never null).
+`"output_lower_bound"` -- never null), and `prompt_tokens` (the request's
+prompt length as an integer, or null when unknown).
 
 ## License
 
@@ -403,6 +445,10 @@ MIT. See [LICENSE](LICENSE).
   未知のモデル・単価表にない token 種別は `unpriced` として扱い、憶測の価格を出しません。
 - 単価表 (`agent_cost/rates.json`) は履歴型カタログで、値上げは新しい期間として追加します。
   `--rates PATH` で別カタログに完全差し替えできます。
+- prompt 長で単価が変わるモデル（`claude-haiku-5-5`、100,000 tokens 超で高い単価）は期間の
+  `prompt_tiers`（schema_version `"2"`）で表し、リクエストごとの prompt 長（input + cache read +
+  cache write）で tier を選びます。prompt 長が不明な fact（Codex 由来、conflicting group、usage
+  不整合）は基底 tier（最安）で **下限推計**（`lower_bound`）になります。
 - `agent-cost measure --session-id ID [--session-id ID ...] --format json` は他プログラムから
   subprocess で叩くための機械可読な契約です（`protocol_version: "measure/v1"`）。指定した
   session_id が1件も見つからなくても終了コードは0（空集計として表現）、`--session-id` 未指定など

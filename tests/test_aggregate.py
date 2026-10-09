@@ -221,3 +221,160 @@ def test_build_rows_worst_status_ranking_is_order_independent():
     ):
         rows, _ = build_rows(facts, catalog, group_by=("agent",))
         assert rows[0].pricing_status == "unpriced"
+
+
+# ── prompt-length tiers (prompt_tiers) ──
+
+
+def _tiered_catalog(tmp_path):
+    import json
+
+    def rate(**values):
+        return {
+            "rate_id": "r1",
+            "effective_from": "2025-01-01T00:00:00+00:00",
+            "effective_until": None,
+            **values,
+        }
+
+    data = {
+        "schema_version": "2",
+        "catalog_version": "test",
+        "currency": "USD",
+        "unit": "per_mtok",
+        "usd_per_credit": "0.04",
+        "sources": [],
+        "models": [
+            {
+                "model_key": "tiered",
+                "aliases": [],
+                "fast_multiplier": "1.0",
+                "rates": [
+                    rate(
+                        input_nocache="1.0",
+                        cache_read="0.1",
+                        cache_write_5m="1.25",
+                        cache_write_1h="2.0",
+                        output="5.0",
+                        prompt_tiers=[
+                            {
+                                "prompt_tokens_over": 100000,
+                                "input_nocache": "2.0",
+                                "cache_read": "0.2",
+                                "cache_write_5m": "2.5",
+                                "cache_write_1h": "4.0",
+                                "output": "10.0",
+                            },
+                            {
+                                "prompt_tokens_over": 200000,
+                                "input_nocache": "3.0",
+                                "cache_read": "0.3",
+                                "cache_write_5m": "3.75",
+                                "cache_write_1h": "6.0",
+                                "output": "15.0",
+                            },
+                        ],
+                    )
+                ],
+            },
+            {
+                "model_key": "flat",
+                "aliases": [],
+                "fast_multiplier": "1.0",
+                "rates": [
+                    rate(
+                        input_nocache="1.0",
+                        cache_read="0.1",
+                        cache_write_5m="1.25",
+                        cache_write_1h="2.0",
+                        output="5.0",
+                    )
+                ],
+            },
+        ],
+    }
+    path = tmp_path / "rates.json"
+    path.write_text(json.dumps(data))
+    return load_rates(path)
+
+
+def _tiered_fact(**kwargs):
+    base = dict(model_raw="tiered", model_key="tiered", token_kind="output")
+    base.update(kwargs)
+    return _fact(**base)
+
+
+def test_price_fact_prompt_tier_boundary_is_strictly_greater_than(tmp_path):
+    catalog = _tiered_catalog(tmp_path)
+    expected = {
+        100000: Decimal("5.0"),  # base: prompt length <= first threshold
+        100001: Decimal("10.0"),  # tier 1
+        200000: Decimal("10.0"),  # still tier 1 (not > 200000)
+        200001: Decimal("15.0"),  # tier 2: the largest threshold exceeded
+        1: Decimal("5.0"),
+    }
+    for prompt_tokens, cost_per_mtok in expected.items():
+        cost, status, credits = price_fact(catalog, _tiered_fact(prompt_tokens=prompt_tokens))
+        assert (prompt_tokens, cost, status) == (prompt_tokens, cost_per_mtok, "priced")
+        assert credits is None
+
+
+def test_price_fact_prompt_tier_applies_to_every_token_kind(tmp_path):
+    catalog = _tiered_catalog(tmp_path)
+    for kind, cost_per_mtok in (
+        ("input_nocache", Decimal("2.0")),
+        ("cache_read", Decimal("0.2")),
+        ("cache_write_5m", Decimal("2.5")),
+        ("cache_write_1h", Decimal("4.0")),
+        ("output", Decimal("10.0")),
+    ):
+        cost, status, _ = price_fact(catalog, _tiered_fact(token_kind=kind, prompt_tokens=150000))
+        assert (kind, cost, status) == (kind, cost_per_mtok, "priced")
+
+
+def test_price_fact_unknown_prompt_length_on_tiered_model_is_base_lower_bound(tmp_path):
+    catalog = _tiered_catalog(tmp_path)
+    cost, status, _ = price_fact(catalog, _tiered_fact(prompt_tokens=None))
+    assert cost == Decimal("5.0")
+    assert status == "lower_bound"
+
+
+def test_price_fact_cache_write_unknown_on_tiered_model_uses_tier_5m_rate_as_lower_bound(tmp_path):
+    catalog = _tiered_catalog(tmp_path)
+    cost, status, _ = price_fact(
+        catalog, _tiered_fact(token_kind="cache_write_unknown", prompt_tokens=150000)
+    )
+    assert cost == Decimal("2.5")
+    assert status == "lower_bound"
+    cost, status, _ = price_fact(
+        catalog, _tiered_fact(token_kind="cache_write_unknown", prompt_tokens=50000)
+    )
+    assert cost == Decimal("1.25")
+    assert status == "lower_bound"
+
+
+def test_price_fact_flat_model_ignores_prompt_tokens(tmp_path):
+    catalog = _tiered_catalog(tmp_path)
+    for kind in ("input_nocache", "output", "cache_write_unknown"):
+        results = {
+            price_fact(catalog, _fact(model_raw="flat", model_key="flat", token_kind=kind, prompt_tokens=pt))
+            for pt in (None, 1, 100001, 10_000_000)
+        }
+        assert len(results) == 1, (kind, results)
+    # Same check against the packaged catalog's flat entries.
+    packaged = load_rates()
+    assert price_fact(packaged, _fact(prompt_tokens=500000)) == price_fact(packaged, _fact())
+
+
+def test_build_rows_sums_each_fact_at_its_own_tier(tmp_path):
+    catalog = _tiered_catalog(tmp_path)
+    facts = [
+        _tiered_fact(prompt_tokens=90000),  # base: 1M output tokens * 5.0
+        _tiered_fact(prompt_tokens=150000),  # tier 1: 1M output tokens * 10.0
+    ]
+    rows, dq = build_rows(facts, catalog)
+    assert len(rows) == 1
+    assert rows[0].estimated_cost_usd == Decimal("15.0")
+    assert rows[0].pricing_status == "priced"
+    assert rows[0].tokens == 2_000_000
+    assert dq.unpriced_tokens == 0
