@@ -168,6 +168,7 @@ def cmd_export(args) -> int:
                 "tokens": f.tokens,
                 "mode": f.mode,
                 "source_quality": f.source_quality,
+                "prompt_tokens": f.prompt_tokens,
             }
             out.write(json.dumps(record, ensure_ascii=False) + "\n")
     finally:
@@ -305,6 +306,11 @@ def cmd_rates_show(args) -> int:
             print(f"  [{period.rate_id}] {period.effective_from.isoformat()} .. {until}")
             for field_name, value in period.values.items():
                 print(f"      {field_name}: {value if value is not None else '(unpriced)'}")
+            if period.prompt_tiers:
+                print("      prompt_tiers:")
+                for tier in period.prompt_tiers:
+                    values = " ".join(f"{name}={value}" for name, value in tier.values.items())
+                    print(f"        > {tier.prompt_tokens_over}: {values}")
         return 0
 
     print(f"catalog_version: {catalog.catalog_version}")

@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from importlib import resources
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 RATE_FIELDS = (
     "input_nocache",
@@ -30,8 +30,11 @@ RATE_FIELDS = (
 # knows how to interpret. A catalog claiming anything else is rejected
 # outright rather than silently treated as USD-per-mtok -- a catalog in a
 # different currency or unit priced as if it were USD-per-mtok would be
-# wrong by a fixed, silent factor.
-SUPPORTED_SCHEMA_VERSIONS = ("1",)
+# wrong by a fixed, silent factor. Schema "2" adds optional per-period
+# ``prompt_tiers``; it is a separate version (and "1" may not carry tiers)
+# so that a reader that predates tiers rejects a tiered catalog as
+# unsupported instead of silently pricing every request at the base tier.
+SUPPORTED_SCHEMA_VERSIONS = ("1", "2")
 SUPPORTED_CURRENCIES = ("USD",)
 SUPPORTED_UNITS = ("per_mtok",)
 
@@ -41,11 +44,27 @@ class RatesValidationError(ValueError):
 
 
 @dataclass(frozen=True)
+class PromptTier:
+    """Rate values for requests whose prompt length is strictly greater
+    than ``prompt_tokens_over``."""
+
+    prompt_tokens_over: int
+    values: dict
+
+
+@dataclass(frozen=True)
 class RatePeriod:
     rate_id: str
     effective_from: datetime
     effective_until: Optional[datetime]
+    # Base tier: prompt length <= the first tier's threshold (or every
+    # request, when there are no tiers).
     values: dict
+    # Ascending by threshold; a request uses the tier with the largest
+    # threshold its prompt length exceeds. Every value in a tiered period
+    # is non-null and non-decreasing tier to tier, so ``values`` is the
+    # cheapest (a lower bound) when the prompt length is unknown.
+    prompt_tiers: Tuple[PromptTier, ...] = ()
 
     def covers(self, moment: datetime) -> bool:
         if moment < self.effective_from:
@@ -125,7 +144,46 @@ def _parse_datetime(value, *, field_name: str) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-def _build_model_entry(raw: dict) -> ModelEntry:
+def _build_prompt_tiers(tiers_raw, base_values: dict, *, where: str) -> Tuple[PromptTier, ...]:
+    if not isinstance(tiers_raw, list):
+        raise RatesValidationError(f"{where}: prompt_tiers must be a list")
+    if not tiers_raw:
+        return ()
+
+    for f in RATE_FIELDS:
+        if base_values[f] is None:
+            raise RatesValidationError(f"{where}: {f} is required when prompt_tiers is present")
+
+    tiers = []
+    previous_values = base_values
+    previous_over = None
+    for idx, tier_raw in enumerate(tiers_raw):
+        tier_where = f"{where}.prompt_tiers[{idx}]"
+        if not isinstance(tier_raw, dict):
+            raise RatesValidationError(f"{tier_where}: must be an object")
+        over = tier_raw.get("prompt_tokens_over")
+        if isinstance(over, bool) or not isinstance(over, int) or over <= 0:
+            raise RatesValidationError(f"{tier_where}: prompt_tokens_over must be a positive int, got {over!r}")
+        if previous_over is not None and over <= previous_over:
+            raise RatesValidationError(
+                f"{tier_where}: prompt_tokens_over must be ascending without duplicates "
+                f"({over} after {previous_over})"
+            )
+        values = {f: _parse_decimal(tier_raw.get(f), field_name=f"{tier_where}.{f}") for f in RATE_FIELDS}
+        for f in RATE_FIELDS:
+            if values[f] is None:
+                raise RatesValidationError(f"{tier_where}: {f} is required")
+            if values[f] < previous_values[f]:
+                raise RatesValidationError(
+                    f"{tier_where}: {f} {values[f]} is lower than the previous tier's {previous_values[f]}"
+                )
+        tiers.append(PromptTier(prompt_tokens_over=over, values=values))
+        previous_values = values
+        previous_over = over
+    return tuple(tiers)
+
+
+def _build_model_entry(raw: dict, *, schema_version: str) -> ModelEntry:
     model_key = raw.get("model_key")
     if not model_key or not isinstance(model_key, str):
         raise RatesValidationError(f"model entry missing model_key: {raw!r}")
@@ -169,12 +227,22 @@ def _build_model_entry(raw: dict) -> ModelEntry:
             f: _parse_decimal(rate_raw.get(f), field_name=f"{model_key}.{rate_id}.{f}")
             for f in RATE_FIELDS
         }
+        prompt_tiers: Tuple[PromptTier, ...] = ()
+        if "prompt_tiers" in rate_raw:
+            if schema_version == "1":
+                raise RatesValidationError(
+                    f"{model_key}.{rate_id}: prompt_tiers requires schema_version \"2\""
+                )
+            prompt_tiers = _build_prompt_tiers(
+                rate_raw["prompt_tiers"], values, where=f"{model_key}.{rate_id}"
+            )
         periods.append(
             RatePeriod(
                 rate_id=rate_id,
                 effective_from=effective_from,
                 effective_until=effective_until,
                 values=values,
+                prompt_tiers=prompt_tiers,
             )
         )
 
@@ -227,7 +295,7 @@ def _validate_and_build(data: dict) -> RateCatalog:
 
     models: dict = {}
     for raw in data.get("models") or []:
-        entry = _build_model_entry(raw)
+        entry = _build_model_entry(raw, schema_version=schema_version)
         if entry.model_key in models:
             raise RatesValidationError(f"duplicate model_key: {entry.model_key}")
         models[entry.model_key] = entry

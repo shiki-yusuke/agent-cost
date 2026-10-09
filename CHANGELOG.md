@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.4.0
+
+Adds `claude-haiku-5-5`, whose price depends on each request's prompt length,
+and the catalog / fact fields needed to express that. Rows and totals for
+every model without prompt tiers are identical to 0.3.0; only
+`claude-haiku-5-5` rows differ (they were `unpriced` and are now priced).
+
+### Added
+
+- `claude-haiku-5-5` rate entry (catalog_version `2026-10-09`), effective
+  from the release date 2026-10-07 (platform.claude.com model overview), fast
+  multiplier 1.0, a separate entry rather than an alias of
+  `claude-haiku-4-5`. Per the pricing page (retrieved 2026-10-09): prompts up
+  to 100,000 tokens $0.10 / $0.01 / $0.125 / $0.20 / $0.50 per MTok
+  (input / cache read / 5m cache write / 1h cache write / output), prompts
+  over 100,000 tokens $0.50 / $0.05 / $0.625 / $1 / $2.50; `cache_read` is the
+  standard 0.1x. Claude Code's 2.1.293 changelog entry makes Haiku 5.5 the
+  default Haiku model, so `model: haiku` rows now carry this raw ID.
+- Optional `prompt_tiers` on a rate period: the period's own values are the
+  base tier (prompt length <= the first threshold); each tier applies to
+  prompts strictly over its `prompt_tokens_over`, and a request uses the
+  largest threshold it exceeds. Validation: thresholds are positive ints,
+  ascending, no duplicates; in a tiered period every value of the base and of
+  every tier is present and non-null; every value is >= the same value in the
+  previous tier (so the base is a true lower bound).
+- `Fact.prompt_tokens` (appended after `source_quality`, default `None`): the
+  request's prompt length, `input_tokens + cache_read_input_tokens +
+  cache_creation_input_tokens`, matching the pricing page's Long context
+  pricing definition (cache reads and writes count; each request is priced on
+  its own, output included). The Claude reader sets it on every fact of a row;
+  it is `None` for a conflicting dedup group, for a row whose cache-write TTL
+  breakdown exceeds `cache_creation_input_tokens`, and for every Codex fact
+  (a delta of cumulative totals, not one request). `export` JSONL records
+  carry it as `prompt_tokens` (int or null).
+- `rates show --model` prints a period's tiers under a `prompt_tiers:` line,
+  e.g. `> 100000: input_nocache=0.50 cache_read=0.05 cache_write_5m=0.625
+  cache_write_1h=1.0 output=2.50`.
+
+### Changed
+
+- The packaged `rates.json` is `schema_version` `"2"`. The loader accepts
+  `"1"` and `"2"`, and rejects a `"1"` catalog that contains `prompt_tiers`.
+  agent-cost 0.3.0 and earlier reject a `"2"` catalog as an unsupported
+  schema_version -- it fails to load rather than pricing every request at
+  the cheaper tier.
+- Pricing: a fact for a tiered period is priced at its tier and is
+  `priced`; one whose `prompt_tokens` is unknown is priced at the base tier
+  and is `lower_bound`. `cache_write_unknown` keeps its 5-minute-rate
+  `lower_bound` treatment, at the selected tier's 5-minute rate. `report` /
+  `measure` row shapes are unchanged.
+
+### Upgrade notes
+
+- A downstream consumer that validates `export` JSONL against a fixed schema
+  must allow the new `prompt_tokens` key (int or null).
+- A custom catalog passed with `--rates` must declare `schema_version` `"2"`
+  to use `prompt_tiers`; an existing `"1"` catalog without tiers keeps
+  working unchanged.
+
 ## 0.3.0
 
 Reader flag-only release: no token amount, dedup adoption or conflict

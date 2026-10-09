@@ -778,3 +778,55 @@ def test_measure_json_schema_is_locked(tmp_path, monkeypatch, capsys):
         "estimated_cost_usd": 0.0,
         "credits": 0.0,
     }
+
+
+def test_export_jsonl_includes_prompt_tokens(tmp_path, monkeypatch, capsys):
+    claude_home, codex_home = _setup_env(tmp_path, monkeypatch)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [_assistant_event("2026-06-01T00:00:00Z", "claude-opus-4-8", 10, 5)],
+    )
+    _write_codex_thread(
+        codex_home,
+        thread_id="t1",
+        model="gpt-5.5",
+        rollout_events=[_token_count_event("2026-06-15T00:00:00Z", input_tokens=1000, output_tokens=200)],
+        tokens_used=1200,
+        created_at_ms=0,
+    )
+    out_path = tmp_path / "facts.jsonl"
+    rc = cli.main(["export", "--out", str(out_path)])
+    assert rc == 0
+    records = [json.loads(line) for line in out_path.read_text().strip().splitlines()]
+    claude_records = [r for r in records if r["agent"] == "claude"]
+    codex_records = [r for r in records if r["agent"] == "codex"]
+    assert claude_records and codex_records
+    assert all("prompt_tokens" in r for r in records)
+    assert all(r["prompt_tokens"] == 10 for r in claude_records)
+    assert all(r["prompt_tokens"] is None for r in codex_records)
+
+
+def test_rates_show_model_prints_prompt_tiers(capsys):
+    rc = cli.main(["rates", "show", "--model", "claude-haiku-5-5"])
+    assert rc == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert "      prompt_tiers:" in lines
+    assert (
+        "        > 100000: input_nocache=0.50 cache_read=0.05 cache_write_5m=0.625 cache_write_1h=1.0 output=2.50"
+        in lines
+    )
+    assert lines.index("      output: 0.50") < lines.index("      prompt_tiers:")
+
+
+def test_rates_show_model_without_tiers_prints_no_prompt_tiers(capsys):
+    rc = cli.main(["rates", "show", "--model", "claude-haiku-4-5"])
+    assert rc == 0
+    assert "prompt_tiers" not in capsys.readouterr().out
+
+
+def test_rates_validate_packaged_catalog_with_prompt_tiers_exits_zero(capsys):
+    rc = cli.main(["rates", "validate"])
+    assert rc == 0
+    assert "catalog_version=2026-10-09" in capsys.readouterr().out
