@@ -1,6 +1,8 @@
 import json
 from datetime import datetime, timezone
 
+import pytest
+
 from agent_cost.readers.claude import parse_session_facts, read_claude_facts
 
 
@@ -400,3 +402,62 @@ def test_prompt_tokens_is_none_when_ttl_breakdown_exceeds_cache_creation_total(t
     assert malformed == 0
     assert facts  # the row's facts are still emitted
     assert all(f.prompt_tokens is None for f in facts)
+
+
+@pytest.mark.parametrize("ttl_field", ["eph_5m", "eph_1h"])
+def test_prompt_tokens_is_none_when_a_ttl_breakdown_field_is_negative(tmp_path, ttl_field):
+    # Prompt length 100001 (over the 100K tier threshold); the negative TTL
+    # field keeps the breakdown sum under cache_creation_input_tokens, so only
+    # the per-field sign check catches it.
+    jsonl = tmp_path / "p7.jsonl"
+    overrides = {"eph_5m": 0, "eph_1h": 0, ttl_field: -1}
+    write_jsonl(
+        jsonl,
+        [_haiku_row("msg-1", "req-1", input_tokens=1, cache_read=100000, cache_creation=0, **overrides)],
+    )
+    facts, malformed = parse_session_facts(jsonl)
+    assert malformed == 0
+    assert facts  # the row's facts are still emitted
+    assert all(f.prompt_tokens is None for f in facts)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"input_tokens": -1, "cache_read": 100002, "cache_creation": 0, "eph_5m": 0},
+        {"input_tokens": 100002, "cache_read": -1, "cache_creation": 0, "eph_5m": 0},
+        {"input_tokens": 1, "cache_read": 100001, "cache_creation": -1, "eph_5m": 0},
+    ],
+    ids=["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"],
+)
+def test_prompt_tokens_is_none_when_a_top_level_field_is_negative(tmp_path, fields):
+    jsonl = tmp_path / "p8.jsonl"
+    write_jsonl(jsonl, [_haiku_row("msg-1", "req-1", **fields)])
+    facts, malformed = parse_session_facts(jsonl)
+    assert malformed == 0
+    assert facts
+    assert all(f.prompt_tokens is None for f in facts)
+
+
+def test_prompt_tokens_is_none_when_one_row_of_a_streaming_group_is_inconsistent(tmp_path):
+    from agent_cost.readers.claude import parse_session_detailed
+
+    # Both rows yield the same tokens (cache_write_5m=110000), so the group is
+    # an ordinary streaming progression; but the first row's TTL breakdown
+    # exceeds its cache_creation_input_tokens, so its prompt length is None
+    # and the group's prompt length isn't settled.
+    jsonl = tmp_path / "p9.jsonl"
+    write_jsonl(
+        jsonl,
+        [
+            _haiku_row("msg-1", "req-1", input_tokens=10, cache_read=0, cache_creation=90000, eph_5m=110000,
+                       output=3, stop_reason=None),
+            _haiku_row("msg-1", "req-1", input_tokens=10, cache_read=0, cache_creation=110000, eph_5m=110000,
+                       output=10, ts="2026-10-08T00:00:01Z"),
+        ],
+    )
+    result = parse_session_detailed(jsonl)
+    assert result.conflicting_duplicate_groups == 0
+    assert result.duplicate_rows_skipped == 1
+    assert {f.token_kind: f.tokens for f in result.facts} == {"input_nocache": 10, "cache_write_5m": 110000, "output": 10}
+    assert all(f.prompt_tokens is None for f in result.facts)

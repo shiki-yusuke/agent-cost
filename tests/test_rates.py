@@ -1,9 +1,12 @@
+import hashlib
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
+from importlib import resources
 
 import pytest
 
-from agent_cost.rates import RatesValidationError, load_rates
+from agent_cost.rates import RATE_FIELDS, RatesValidationError, load_rates
 
 UTC = timezone.utc
 
@@ -462,14 +465,27 @@ def test_base_rate_field_null_is_still_allowed_without_prompt_tiers(tmp_path):
     assert catalog.models["m1"].rates[0].values["cache_write_5m"] is None
 
 
-def test_prompt_tier_cheaper_than_base_raises(tmp_path):
-    tier = dict(_TIER_100K, output="4.99")  # base output is 5.0
+_BASE_RATE_VALUES = {
+    "input_nocache": Decimal("1.0"),
+    "cache_read": Decimal("0.1"),
+    "cache_write_5m": Decimal("1.25"),
+    "cache_write_1h": Decimal("2.0"),
+    "output": Decimal("5.0"),
+}
+
+
+@pytest.mark.parametrize("field_name", RATE_FIELDS)
+def test_prompt_tier_cheaper_than_base_raises(tmp_path, field_name):
+    cheaper = str(_BASE_RATE_VALUES[field_name] - Decimal("0.01"))
+    tier = dict(_TIER_100K, **{field_name: cheaper})
     with pytest.raises(RatesValidationError, match="m1.r1"):
         load_rates(_write(tmp_path, _tiered_catalog([tier])))
 
 
-def test_second_prompt_tier_cheaper_than_first_raises(tmp_path):
-    tier_200k = dict(_TIER_100K, prompt_tokens_over=200000, cache_read="0.19")  # first tier is 0.2
+@pytest.mark.parametrize("field_name", RATE_FIELDS)
+def test_second_prompt_tier_cheaper_than_first_raises(tmp_path, field_name):
+    cheaper = str(Decimal(_TIER_100K[field_name]) - Decimal("0.01"))
+    tier_200k = dict(_TIER_100K, prompt_tokens_over=200000, **{field_name: cheaper})
     with pytest.raises(RatesValidationError, match="m1.r1"):
         load_rates(_write(tmp_path, _tiered_catalog([dict(_TIER_100K), tier_200k])))
 
@@ -495,3 +511,20 @@ def test_packaged_catalog_only_claude_haiku_5_5_has_prompt_tiers():
                 assert period.prompt_tiers != ()
             else:
                 assert period.prompt_tiers == (), (model_key, period.rate_id)
+
+
+# sha256 of the packaged catalog's models other than claude-haiku-5-5, as
+# json.dumps(sort_keys=True, separators=(",", ":")).
+_EXISTING_MODELS_SHA256 = "f3bfe615ec748aaa6d443083a6fe87b87c3cfd8fac68b4dfc3e1f1608c2e90d9"
+
+
+def test_packaged_catalog_existing_models_are_unchanged():
+    """Adding claude-haiku-5-5 must leave every other model's entry exactly
+    as it was. A change that alters an existing model's values, order or
+    periods must update this fixed value deliberately -- existing catalog
+    rows are never changed in place; a price change adds a new period.
+    """
+    raw = json.loads(resources.files("agent_cost").joinpath("rates.json").read_bytes())
+    existing = [m for m in raw["models"] if m["model_key"] != "claude-haiku-5-5"]
+    digest = hashlib.sha256(json.dumps(existing, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    assert digest == _EXISTING_MODELS_SHA256

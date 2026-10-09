@@ -29,6 +29,6 @@ def test_pyproject_version_matches_package_version():
     assert _pyproject_version() == agent_cost.__version__
 
 
-def test_version_is_0_2_0():
+def test_version_is_0_4_0():
     assert agent_cost.__version__ == "0.4.0"
     assert _pyproject_version() == "0.4.0"
