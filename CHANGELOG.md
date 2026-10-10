@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1
+
+### Fixed
+
+- `--since` / `--until` whose UTC normalization overflows are now rejected
+  with the usual `[error] invalid date/time` message instead of a traceback.
+
 ## 0.5.0
 
 Adds an opt-in, confidential internal billing layer to `report`. Without the

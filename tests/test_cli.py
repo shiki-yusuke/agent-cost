@@ -4,6 +4,8 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -257,6 +259,55 @@ def test_invalid_since_still_rejected_after_z_suffix_fix(tmp_path, monkeypatch):
     except SystemExit:
         raised = True
     assert raised  # unchanged pre-existing behavior for report/export
+
+
+def _run_cli_process(tmp_path, *argv):
+    """Run the CLI in a real interpreter so the process exit code, stdout and
+    stderr (including any traceback) are observed exactly as a user sees them."""
+    claude_home = tmp_path / "claude_home"
+    codex_home = tmp_path / "codex_home"
+    claude_home.mkdir(exist_ok=True)
+    codex_home.mkdir(exist_ok=True)
+    env = dict(os.environ)
+    env["CLAUDE_HOME"] = str(claude_home)
+    env["CODEX_HOME"] = str(codex_home)
+    env.pop("AGENT_COST_CONFIG", None)
+    repo_root = Path(__file__).resolve().parent.parent
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(repo_root), env.get("PYTHONPATH")]))
+    return subprocess.run(
+        [sys.executable, "-c", "import sys; from agent_cost import cli; sys.exit(cli.main(sys.argv[1:]))", *argv],
+        cwd=str(repo_root),
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+@pytest.mark.parametrize(
+    "argv, bad_value",
+    [
+        (["--since", "0001-01-01T00:00:00+23:59"], "0001-01-01T00:00:00+23:59"),
+        # Date-only input in a zone whose year-1 offset is positive (Asia/Tokyo
+        # LMT +09:18:59). Pacific/Kiritimati does not overflow here: its year-1
+        # offset is LMT -10:29:20.
+        (["--since", "0001-01-01", "--timezone", "Asia/Tokyo"], "0001-01-01"),
+        (["--until", "9999-12-31T23:59:59-12:00"], "9999-12-31T23:59:59-12:00"),
+    ],
+)
+def test_report_window_bound_utc_overflow_is_invalid_date_error(tmp_path, argv, bad_value):
+    baseline = _run_cli_process(tmp_path, "report", "--since", "not-a-date")
+    assert baseline.returncode != 0
+    assert "invalid date/time" in baseline.stderr
+
+    result = _run_cli_process(tmp_path, "report", *argv)
+    assert result.returncode == baseline.returncode
+    assert result.stdout == ""
+    assert "invalid date/time" in result.stderr
+    assert repr(bad_value) in result.stderr
+    assert "Traceback" not in result.stderr
+    assert "OverflowError" not in result.stderr
 
 
 def test_report_cli_includes_codex_thread_created_before_window(tmp_path, monkeypatch, capsys):
