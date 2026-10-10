@@ -1,9 +1,9 @@
 """Spec: pyproject.toml's [project].version and agent_cost.__version__ must
-agree, and both must read "0.4.0" for this change (claude-haiku-5-5's
-prompt-length-tiered rates add Fact.prompt_tokens, an export field and rates
-schema_version "2" -- additive changes, so it bumps the minor version). A
-broken implementation would bump one file but not the other, or forget the
-bump entirely.
+agree, and both must read "0.5.0" for this change (``report --billing-plan
+PATH`` adds an opt-in internal_billing block; output without the flag is
+unchanged -- an additive change, so it bumps the minor version). A broken
+implementation would bump one file but not the other, or forget the bump
+entirely.
 
 Uses a plain regex instead of tomllib/tomli: this repo is dependency-free
 by design (pyproject.toml's own dependencies = []) and tomllib is
@@ -29,6 +29,6 @@ def test_pyproject_version_matches_package_version():
     assert _pyproject_version() == agent_cost.__version__
 
 
-def test_version_is_0_4_0():
-    assert agent_cost.__version__ == "0.4.0"
-    assert _pyproject_version() == "0.4.0"
+def test_version_is_0_5_0():
+    assert agent_cost.__version__ == "0.5.0"
+    assert _pyproject_version() == "0.5.0"

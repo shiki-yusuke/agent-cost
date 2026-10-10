@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import decimal
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from . import __version__
 from .aggregate import DataQuality, build_rows, filter_facts, rows_totals, scope_dedup_units
+from .billing_plan import BillingPlanError, compute_internal_billing, format_internal_billing, load_billing_plan
 from .config import load_config
 from .facts import SOURCE_QUALITY_VALUES
 from .rates import RatesValidationError, load_rates
@@ -51,6 +54,37 @@ def _parse_window_bound(value: Optional[str], tz: ZoneInfo) -> Optional[datetime
         return dt.astimezone(timezone.utc)
     # Date-only (or naive datetime) input is interpreted in --timezone.
     return dt.replace(tzinfo=tz).astimezone(timezone.utc)
+
+
+def _now_utc() -> datetime:
+    """The run's ``generated_at``: ``AGENT_COST_NOW`` (ISO 8601 with a UTC
+    offset, for reproducible output) if set, else the current time. Raises
+    ``ValueError`` when ``AGENT_COST_NOW`` is set but not a valid instant."""
+    value = os.environ.get("AGENT_COST_NOW")
+    if value is None:
+        return datetime.now(timezone.utc)
+    text = value[:-1] + "+00:00" if value.endswith("Z") else value
+    dt = datetime.fromisoformat(text)
+    if dt.tzinfo is None or dt.utcoffset() is None:
+        raise ValueError("AGENT_COST_NOW must carry a UTC offset")
+    try:
+        return dt.astimezone(timezone.utc)
+    except OverflowError:
+        raise ValueError("AGENT_COST_NOW must be a valid instant") from None
+
+
+def _billing_plan_conflict(args, agents: set, since, until) -> Optional[str]:
+    if args.rates is not None:
+        return "cannot be combined with --rates"
+    if args.format == "csv":
+        return "cannot be combined with --format csv"
+    if "claude" not in agents:
+        return "--agent must include claude"
+    if since is None or until is None:
+        return "--since and --until are both required"
+    if since >= until:
+        return "--since must be earlier than --until"
+    return None
 
 
 def _collect_facts(config, *, agents: set, exclude_archived: bool):
@@ -105,6 +139,26 @@ def cmd_report(args) -> int:
         "token-kind",
     )
 
+    plan = None
+    if args.billing_plan is not None:
+        conflict = _billing_plan_conflict(args, agents, since, until)
+        if conflict:
+            print(f"[error] --billing-plan: {conflict}", file=sys.stderr)
+            return 2
+
+    try:
+        generated_at = _now_utc()
+    except ValueError:
+        print("[error] invalid AGENT_COST_NOW (expected ISO 8601 with a UTC offset)", file=sys.stderr)
+        return 2
+
+    if args.billing_plan is not None:
+        try:
+            plan = load_billing_plan(Path(args.billing_plan))
+        except BillingPlanError as exc:
+            print(f"[error] --billing-plan: {exc}", file=sys.stderr)
+            return 2
+
     try:
         catalog = load_rates(Path(args.rates) if args.rates else None)
     except RatesValidationError as exc:
@@ -128,7 +182,7 @@ def cmd_report(args) -> int:
 
     payload = {
         "schema_version": "1",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": generated_at.isoformat(),
         "window": {
             "since": since.isoformat() if since else None,
             "until": until.isoformat() if until else None,
@@ -139,6 +193,19 @@ def cmd_report(args) -> int:
         "data_quality": dq.to_dict(),
         "rows": [r.to_dict() for r in rows],
     }
+    if plan is not None:
+        try:
+            block = compute_internal_billing(
+                plan, facts, catalog, since=since, until=until, generated_at=generated_at
+            )
+            internal_billing = format_internal_billing(block)
+        except BillingPlanError as exc:
+            print(f"[error] --billing-plan: {exc}", file=sys.stderr)
+            return 2
+        except decimal.DecimalException:
+            print("[error] --billing-plan: internal billing arithmetic failed", file=sys.stderr)
+            return 2
+        payload["internal_billing"] = internal_billing
 
     renderer = {"table": render_table, "csv": render_csv, "json": render_json}[args.format]
     print(renderer(payload))
@@ -209,6 +276,12 @@ def cmd_measure(args) -> int:
     agents = set(args.agent.split(",")) if args.agent else {"claude", "codex"}
 
     try:
+        generated_at = _now_utc()
+    except ValueError:
+        print("[error] invalid AGENT_COST_NOW (expected ISO 8601 with a UTC offset)", file=sys.stderr)
+        return 2
+
+    try:
         catalog = load_rates(Path(args.rates) if args.rates else None)
     except RatesValidationError as exc:
         print(f"[error] rates catalog invalid: {exc}", file=sys.stderr)
@@ -256,7 +329,7 @@ def cmd_measure(args) -> int:
         "protocol_version": MEASURE_PROTOCOL_VERSION,
         "producer_version": __version__,
         "accounting_basis": ACCOUNTING_BASIS,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": generated_at.isoformat(),
         "window": {
             "since": since.isoformat() if since else None,
             "until": until.isoformat() if until else None,
@@ -395,6 +468,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--format", choices=["table", "csv", "json"], default="table")
     p_report.add_argument("--rates", help="path to a rates.json that fully replaces the packaged catalog")
     p_report.add_argument("--exclude-archived", action="store_true", help="exclude archived Codex threads")
+    p_report.add_argument(
+        "--billing-plan",
+        metavar="PATH",
+        help="confidential internal billing plan (json); adds internal_billing to json/table output",
+    )
     p_report.set_defaults(func=cmd_report)
 
     p_export = sub.add_parser("export", help="Export canonical facts as JSONL")

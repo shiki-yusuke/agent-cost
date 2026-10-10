@@ -31,6 +31,37 @@ _HEADERS = (
     "Status",
 )
 
+_BILLING_COLUMNS = (
+    "period_id",
+    "from",
+    "until",
+    "list_cost_usd",
+    "allowance_usd",
+    "overage_usd",
+    "overage_cost_usd",
+    "window_subscription_usd",
+    "internal_cost_usd",
+    "query_coverage",
+    "window_state",
+    "list_cost_pricing",
+    "internal_cost_certainty",
+)
+_BILLING_HEADERS = (
+    "Period",
+    "From",
+    "Until",
+    "List Cost",
+    "Allowance",
+    "Overage",
+    "Overage Cost",
+    "Subscription (echo)",
+    "Internal Cost",
+    "Query",
+    "State",
+    "Pricing",
+    "Certainty",
+)
+
 
 def _cell(row: dict, column: str) -> str:
     value = row.get(column)
@@ -74,7 +105,36 @@ def render_table(payload: dict) -> str:
             f"negative_deltas={dq.get('negative_deltas', 0)}  "
             f"unpriced_tokens={dq.get('unpriced_tokens', 0)}"
         )
+
+    billing = payload.get("internal_billing")
+    if billing is not None:
+        lines.append("")
+        lines.extend(_internal_billing_lines(billing))
     return "\n".join(lines)
+
+
+def _internal_billing_lines(billing: dict) -> list:
+    """The confidential internal-billing section appended to the table.
+    Amounts arrive pre-formatted (4-decimal strings); null prints as "-"."""
+    lines = [
+        "Internal billing (CONFIDENTIAL -- do not share): "
+        f"plan {billing['plan_id']} rev {billing['revision_id']} "
+        f"basis {billing['basis']} plan_coverage {billing['plan_coverage']}"
+    ]
+    formatted = [
+        ["-" if w.get(c) is None else str(w.get(c)) for c in _BILLING_COLUMNS] for w in billing["windows"]
+    ]
+    widths = [len(h) for h in _BILLING_HEADERS]
+    for frow in formatted:
+        for i, cell in enumerate(frow):
+            widths[i] = max(widths[i], len(cell))
+    lines.append("  ".join(h.ljust(widths[i]) for i, h in enumerate(_BILLING_HEADERS)))
+    lines.append("  ".join("-" * w for w in widths))
+    for frow in formatted:
+        lines.append("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(frow)))
+    for gap in billing.get("uncovered") or []:
+        lines.append(f"uncovered: {gap['from']} .. {gap['until']}")
+    return lines
 
 
 def render_csv(payload: dict) -> str:
