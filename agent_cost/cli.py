@@ -50,10 +50,15 @@ def _parse_window_bound(value: Optional[str], tz: ZoneInfo) -> Optional[datetime
         dt = datetime.fromisoformat(text)
     except ValueError as exc:
         raise SystemExit(f"[error] invalid date/time: {value!r} ({exc})")
-    if dt.tzinfo is not None:
-        return dt.astimezone(timezone.utc)
-    # Date-only (or naive datetime) input is interpreted in --timezone.
-    return dt.replace(tzinfo=tz).astimezone(timezone.utc)
+    # Normalizing to UTC can overflow datetime's year range near
+    # 0001-01-01 / 9999-12-31 (e.g. "0001-01-01T00:00:00+23:59").
+    try:
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone.utc)
+        # Date-only (or naive datetime) input is interpreted in --timezone.
+        return dt.replace(tzinfo=tz).astimezone(timezone.utc)
+    except OverflowError:
+        raise SystemExit(f"[error] invalid date/time: {value!r} (out of range)") from None
 
 
 def _now_utc() -> datetime:

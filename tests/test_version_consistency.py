@@ -1,7 +1,8 @@
 """Spec: pyproject.toml's [project].version and agent_cost.__version__ must
-agree, and both must read "0.5.0" for this change (``report --billing-plan
-PATH`` adds an opt-in internal_billing block; output without the flag is
-unchanged -- an additive change, so it bumps the minor version). A broken
+agree, and both must read "0.5.1" for this change (``--since`` /
+``--until`` values whose UTC normalization overflows are rejected with the
+usual ``[error] invalid date/time`` message instead of a traceback -- a bug
+fix, so it bumps the patch version). A broken
 implementation would bump one file but not the other, or forget the bump
 entirely.
 
@@ -29,6 +30,6 @@ def test_pyproject_version_matches_package_version():
     assert _pyproject_version() == agent_cost.__version__
 
 
-def test_version_is_0_5_0():
-    assert agent_cost.__version__ == "0.5.0"
-    assert _pyproject_version() == "0.5.0"
+def test_version_is_0_5_1():
+    assert agent_cost.__version__ == "0.5.1"
+    assert _pyproject_version() == "0.5.1"
