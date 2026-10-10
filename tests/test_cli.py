@@ -1172,6 +1172,17 @@ def test_invalid_agent_cost_now_exit_2(tmp_path, monkeypatch, capsys):
             assert "AGENT_COST_NOW" in captured.err
 
 
+def test_agent_cost_now_overflowing_utc_exit_2(tmp_path, monkeypatch, capsys):
+    _setup_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("AGENT_COST_NOW", "0001-01-01T00:00:00+23:59")
+    for argv in (["report", "--format", "json"], ["measure", "--session-id", "x"]):
+        rc = cli.main(argv)
+        captured = capsys.readouterr()
+        assert rc == 2, argv
+        assert captured.out == "", argv
+        assert "Traceback" not in captured.err, argv
+
+
 def test_report_help_mentions_billing_plan(capsys):
     with pytest.raises(SystemExit):
         cli.main(["report", "--help"])

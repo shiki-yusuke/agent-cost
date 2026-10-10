@@ -151,6 +151,31 @@ def test_offset_is_normalized_to_utc():
     assert plan.windows[0].effective_from.utcoffset().total_seconds() == 0
 
 
+def test_whole_second_offset_is_normalized_to_utc():
+    data = _base_plan()
+    data["periods"][0]["effective_from"] = "2030-01-01T00:00:00+00:00:30"
+    plan = bp.parse_billing_plan(json.dumps(data))
+    assert plan.windows[0].effective_from == _utc("2029-12-31T23:59:30+00:00")
+
+
+def test_fractional_second_offset_rejected_as_sub_second():
+    # The local time has no microseconds, but the UTC instant does.
+    data = _base_plan()
+    data["periods"][0]["effective_from"] = "2030-01-01T00:00:00+00:00:30.500000"
+    with pytest.raises(bp.BillingPlanError) as info:
+        bp.parse_billing_plan(json.dumps(data))
+    assert "sub-second" in str(info.value)
+
+
+def test_offset_overflowing_utc_rejected_as_billing_plan_error():
+    data = _base_plan()
+    data["periods"][0]["effective_from"] = "0001-01-01T00:00:00+23:59"
+    with pytest.raises(bp.BillingPlanError) as info:
+        bp.parse_billing_plan(json.dumps(data))
+    rendered = "".join(traceback.format_exception(type(info.value), info.value, info.value.__traceback__))
+    assert "OverflowError" not in rendered
+
+
 def test_exponent_notation_and_negative_zero_accepted():
     data = _base_plan()
     data["periods"][1]["allowance_usd"] = "5E+1"

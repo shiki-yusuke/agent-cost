@@ -269,7 +269,15 @@ def _timestamp(value, where: str) -> datetime:
         raise BillingPlanError(f"{where}: must carry a UTC offset")
     if dt.microsecond != 0:
         raise BillingPlanError(f"{where}: must not have sub-second precision")
-    return dt.astimezone(timezone.utc)
+    try:
+        dt = dt.astimezone(timezone.utc)
+    except OverflowError:
+        raise BillingPlanError(f"{where}: must be an ISO 8601 date-time") from None
+    # An offset with fractional seconds moves a whole-second local time onto
+    # a sub-second UTC instant, which _canonical_time() would truncate.
+    if dt.microsecond != 0:
+        raise BillingPlanError(f"{where}: must not have sub-second precision")
+    return dt
 
 
 def _overage(raw, where: str) -> Overage:

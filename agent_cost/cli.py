@@ -67,7 +67,10 @@ def _now_utc() -> datetime:
     dt = datetime.fromisoformat(text)
     if dt.tzinfo is None or dt.utcoffset() is None:
         raise ValueError("AGENT_COST_NOW must carry a UTC offset")
-    return dt.astimezone(timezone.utc)
+    try:
+        return dt.astimezone(timezone.utc)
+    except OverflowError:
+        raise ValueError("AGENT_COST_NOW must be a valid instant") from None
 
 
 def _billing_plan_conflict(args, agents: set, since, until) -> Optional[str]:
