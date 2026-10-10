@@ -824,7 +824,9 @@ def _mult(value="0.5"):
     return {"type": "charge_multiplier", "value": value}
 
 
-def _fact(ts, usd=None, *, tokens=None, agent="claude", kind="input_nocache", model="claude-test"):
+def _fact(
+    ts, usd=None, *, tokens=None, agent="claude", kind="input_nocache", model="claude-test", source_quality="ok"
+):
     """``usd`` dollars of input at the test rate of $1 / MTok."""
     if tokens is None:
         tokens = int(Decimal(usd) * 1_000_000)
@@ -838,6 +840,7 @@ def _fact(ts, usd=None, *, tokens=None, agent="claude", kind="input_nocache", mo
         token_kind=kind,
         tokens=tokens,
         mode="normal",
+        source_quality=source_quality,
     )
 
 
@@ -1134,6 +1137,46 @@ def test_certainty_indeterminate_for_block_discount(catalog):
     facts_lb = [_fact("2030-01-15T00:00:00+00:00", "60", kind="cache_write_unknown")]
     w = _window(_compute(plan, facts_lb, catalog, since=B_FROM, until=END), "p2")
     assert w["internal_cost_certainty"] == "indeterminate"
+
+
+@pytest.fixture
+def catalog_output(tmp_path):
+    rates = copy.deepcopy(_TEST_RATES)
+    rates["models"][0]["rates"][0]["output"] = "1.0"
+    path = tmp_path / "rates-output.json"
+    path.write_text(json.dumps(rates))
+    return load_rates(path)
+
+
+def _output_quality_facts(source_quality):
+    return [
+        _fact("2030-01-15T00:00:00+00:00", "40"),
+        _fact("2030-01-16T00:00:00+00:00", "3", kind="output", source_quality=source_quality),
+    ]
+
+
+def test_output_lower_bound_fact_makes_window_lower_bound(catalog_output):
+    # The fact prices as "priced", but its tokens are only a lower bound, so
+    # list_cost and internal_cost are too.
+    facts = _output_quality_facts("output_lower_bound")
+    w = _window(_compute(_plan_with(), facts, catalog_output, since=B_FROM, until=END), "p2")
+    assert w["query_coverage"] == "full"
+    assert w["window_state"] == "closed"
+    assert w["list_cost_usd"] == Decimal("43")
+    assert w["priced_tokens"] == 43_000_000
+    assert w["unpriced_tokens"] == 0
+    assert w["list_cost_pricing"] == "lower_bound"
+    assert w["internal_cost_certainty"] == "lower_bound"
+
+
+@pytest.mark.parametrize("source_quality", ["ok", "first_event_delta", "identity_missing"])
+def test_other_source_quality_keeps_window_priced(catalog_output, source_quality):
+    facts = _output_quality_facts(source_quality)
+    w = _window(_compute(_plan_with(), facts, catalog_output, since=B_FROM, until=END), "p2")
+    assert w["list_cost_usd"] == Decimal("43")
+    assert w["priced_tokens"] == 43_000_000
+    assert w["list_cost_pricing"] == "priced"
+    assert w["internal_cost_certainty"] == "estimate"
 
 
 def test_plan_coverage_partial_before_and_after(catalog):

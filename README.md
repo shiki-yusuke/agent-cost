@@ -245,7 +245,9 @@ all as 4-decimal strings -- and four separate status fields:
 - `window_state`: `closed` once the window has ended (`until <=
   generated_at`), otherwise `open`.
 - `list_cost_pricing`: `priced`, `lower_bound` (some facts were unpriced
-  or only priced as a lower bound) or `no_usage_observed`.
+  or only priced as a lower bound, or an output fact's tokens are only a
+  lower bound -- `source_quality: "output_lower_bound"`) or
+  `no_usage_observed`.
 - `internal_cost_certainty`: `estimate` only when the window is fully
   queried, closed and `priced`. Otherwise `lower_bound` for windows with no
   overage or `charge_multiplier` (more usage can only raise the amount), and

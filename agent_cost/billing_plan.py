@@ -518,7 +518,9 @@ def _window_result(window, priced_facts, *, since, until, generated_at) -> dict:
             any_unpriced = True
             unpriced_tokens += f.tokens
             continue
-        if status == "lower_bound":
+        # An output fact whose tokens are only a lower bound prices as
+        # "priced" but still makes list_cost (and internal_cost) a lower bound.
+        if status == "lower_bound" or f.source_quality == "output_lower_bound":
             any_lower_bound = True
         priced_tokens += f.tokens
         if cost is not None:
