@@ -174,6 +174,112 @@ If another program wants to parse agent-cost's output for one or more
 specific session ids, see `agent-cost measure` below rather than
 scraping `report`.
 
+## Internal billing plan (optional, confidential)
+
+Some organizations bill Claude seats internally with their own rules -- a
+fixed subscription per billing window, a usage allowance measured in
+list-price dollars, and a discounted rate above it. `report --billing-plan
+PATH` applies such a plan to the Claude usage agent-cost already prices at
+the public catalog. Nothing changes without the flag, and there is no
+default path or environment variable that turns it on.
+
+```bash
+agent-cost report --billing-plan ~/private/billing-plan.json \
+  --since 2030-01-01T00:00:00+00:00 --until 2030-02-01T00:00:00+00:00 --format json
+```
+
+A plan (`plan_schema_version` `"1"`; every value below is made up):
+
+```json
+{
+  "plan_schema_version": "1",
+  "plan_id": "bp-example",
+  "nonce": "0123456789abcdef0123456789abcdef",
+  "applies_to": {"agent": "claude", "scope": "seat"},
+  "basis": "agent-cost-list-price",
+  "periods": [
+    {"period_id": "p1", "effective_from": "2030-01-01T00:00:00+00:00",
+     "window_subscription_usd": "3", "allowance_usd": null, "overage": null},
+    {"period_id": "p2", "effective_from": "2030-01-11T00:00:00+00:00",
+     "window_subscription_usd": "10", "allowance_usd": "50",
+     "overage": {"type": "charge_multiplier", "value": "0.5"}},
+    {"period_id": "end", "effective_from": "2030-02-01T00:00:00+00:00", "terminates": true}
+  ]
+}
+```
+
+- `periods` is a list of finite billing windows: window *i* is
+  `[effective_from_i, effective_from_{i+1})`, and the last entry must be
+  `{period_id, effective_from, terminates: true}` so that no window is
+  open-ended. Write one window per billing month (or per contract change).
+  `effective_from` needs a UTC offset and no sub-second part.
+- `window_subscription_usd` is the fixed amount billed for that window, as
+  you write it -- agent-cost never prorates it.
+- `allowance_usd` is the window's usage allowance in list-price dollars.
+  `null` means the window has no overage concept at all (it is not a zero
+  allowance), and then `overage` must be `null` too.
+- `overage` prices `max(0, list_cost - allowance)`:
+  `{"type": "charge_multiplier", "value": "0.5"}` charges overage × value
+  (`0 <= value <= 1`), and `{"type": "block_discount", "block_usd": "3",
+  "discount_usd": "2"}` charges overage minus `floor(overage / block_usd) ×
+  discount_usd` (`0 < discount_usd <= block_usd`).
+- Amounts are decimal strings only (no JSON numbers), at most 28
+  significant digits. `plan_id` is `[A-Za-z0-9_-]{1,32}`, `period_id`
+  `[A-Za-z0-9_-]{1,16}`, `nonce` 32 lowercase hex characters (e.g.
+  `python3 -c 'import secrets; print(secrets.token_hex(16))'`). Unknown or
+  duplicate keys are errors. v1 only accepts `scope: "seat"`: an allowance
+  shared by a department or org cannot be computed from one person's logs.
+
+The JSON output gains an `internal_billing` block (existing keys are
+unchanged), and the table gains a section headed `Internal billing
+(CONFIDENTIAL -- do not share)`. For each window that intersects
+`[since, until)` it shows `list_cost_usd` (Claude facts in the window,
+priced at the packaged catalog), `allowance_usd`, `overage_usd`,
+`overage_cost_usd`, `window_subscription_usd`, `internal_cost_usd` --
+all as 4-decimal strings -- and four separate status fields:
+
+- `query_coverage`: `full` when `--since`/`--until` cover the whole
+  window, otherwise `partial`. It says nothing about whether the logs
+  themselves are complete (deleted transcripts, other machines, API or web
+  usage are never seen; see `data_quality` at the top level as well).
+- `window_state`: `closed` once the window has ended (`until <=
+  generated_at`), otherwise `open`.
+- `list_cost_pricing`: `priced`, `lower_bound` (some facts were unpriced
+  or only priced as a lower bound) or `no_usage_observed`.
+- `internal_cost_certainty`: `estimate` only when the window is fully
+  queried, closed and `priced`. Otherwise `lower_bound` for windows with no
+  overage or `charge_multiplier` (more usage can only raise the amount), and
+  `indeterminate` for `block_discount` (more usage can cross a block
+  boundary and lower it). This describes what can be derived from the
+  observed list cost -- it is not a statement that the number matches an
+  actual invoice.
+
+`window_subscription_usd` in each row is the plan's input echoed back, not
+an amount allocated to your query. `internal_cost_usd` is the cost of the
+whole billing window computed from the usage visible in this report -- it
+is not the cost of the `[since, until)` range, so do not sum windows to get
+one. `plan_coverage: partial` with `uncovered` ranges flags the parts of
+`[since, until)` that no window covers (before the first window or after
+`terminates`); usage there is not billed.
+
+`measure` has no billing plan option on purpose: a per-session internal
+cost would mean allocating a window-level charge across sessions.
+`--billing-plan` cannot be combined with `--rates` (the basis must be the
+packaged public catalog), `--format csv`, an `--agent` list without
+`claude`, or a missing `--since`/`--until`; any of those, an unreadable or
+invalid plan, or a calculation that would need rounding exits 2 with
+nothing on stdout. `AGENT_COST_NOW` (an ISO 8601 instant with a UTC offset)
+pins `generated_at`, and with it `window_state`, for reproducible runs.
+
+**Keep the plan and its output private.** The plan must be a regular file
+owned by you with mode `0600` (or stricter), reached without any symlink in
+its path (on macOS `/tmp` and `/var` are symlinks -- keep it under your
+home directory), and not inside a git repository or worktree. Error messages
+never print plan values or the path. Output produced with the plan is
+confidential: agent-cost has no redaction, so mind your terminal scrollback,
+shell history, and the permissions of any file you redirect it to, and keep
+it out of shared logs, CI, artifacts and ledgers.
+
 ## What this measures, and what it doesn't
 
 agent-cost only reads data that is already on disk. It never talks to the
@@ -453,6 +559,9 @@ MIT. See [LICENSE](LICENSE).
   subprocess で叩くための機械可読な契約です（`protocol_version: "measure/v1"`）。指定した
   session_id が1件も見つからなくても終了コードは0（空集計として表現）、`--session-id` 未指定など
   の入力エラーのみ終了コード2です。
+- `report --billing-plan PATH`（任意・機密）は、ローカルの課金プラン（窓ごとの定額・利用枠・超過規則）を
+  公開単価で集計した Claude の list_cost に当てて `internal_billing` を出します。フラグ無しの出力は不変です。
+- plan ファイルは 0600・symlink 不可・git repo 外に置き、出力は機密成果物として扱います（`measure` には按分になるため無し）。
 - 破損したログ行、読めなくなったファイル、Codex の累積カウンタが逆行するケースなどは、すべて
   `data_quality` に件数として記録し、黙って丸めたり捨てたりしません。
 - Codex の `output` は `output_tokens` のみです。実 rollout データを突合した結果

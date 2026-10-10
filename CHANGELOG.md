@@ -1,5 +1,69 @@
 # Changelog
 
+## 0.5.0
+
+Adds an opt-in, confidential internal billing layer to `report`. Without the
+new flag, `report` (json / table / csv), `measure` and `export` produce the
+same output as 0.4.0 (apart from `generated_at`, which is the run time).
+
+### Added
+
+- `report --billing-plan PATH`: reads a local billing plan and appends an
+  `internal_billing` block to json output (and a `CONFIDENTIAL` section to
+  table output). Claude facts are priced at the packaged public catalog as
+  usual (`list_cost_usd`, summed as Decimal straight from `price_fact`), then
+  each plan window applies `internal_cost_usd = window_subscription_usd +
+  g(max(0, list_cost_usd - allowance_usd))`.
+- Plan schema `plan_schema_version` `"1"`: exact key sets everywhere,
+  duplicate keys rejected at every level, amounts as decimal strings only
+  (finite, `>= 0`, at most 28 significant digits, `|adjusted exponent| <=
+  12`), `applies_to` `{agent: "claude", scope: "seat"}`, `basis`
+  `"agent-cost-list-price"`, and `periods` as a list of finite billing windows
+  (`effective_from` with a UTC offset and no sub-second part, strictly
+  ascending; the last period is `{period_id, effective_from, terminates:
+  true}`; at least one regular window). `allowance_usd: null` means no
+  overage concept (with `overage: null`); otherwise `overage` is
+  `{type: "charge_multiplier", value}` (`0 <= value <= 1`) or `{type:
+  "block_discount", block_usd, discount_usd}` (`0 < discount_usd <=
+  block_usd`; the discount is `floor(overage / block_usd) * discount_usd`).
+- `internal_billing` block (`calc_schema_version` `"1"`): `plan_id`,
+  `revision_id` (sha256 of the validated plan's canonical JSON, nonce
+  included), `basis`, `catalog_version` / `catalog_sha256`, `since` /
+  `until` / `generated_at`, `plan_coverage` (`full` / `partial`) with
+  `uncovered` ranges of `[since, until)` that no window covers, and one entry
+  per window intersecting `[since, until)` with counts, 4-decimal string
+  amounts, `query_coverage`, `window_state` (`closed` once the window's end
+  is `<= generated_at`), `list_cost_pricing` (`priced` / `lower_bound` /
+  `no_usage_observed`) and `internal_cost_certainty` (`estimate` /
+  `lower_bound` / `indeterminate`). Arithmetic runs at prec 60 with
+  Inexact/Rounded trapped; only the output is rounded (half-even, 4 places).
+- `AGENT_COST_NOW` environment variable: an ISO 8601 instant with a UTC
+  offset that `report` and `measure` use as `generated_at` (and, with a
+  plan, for `window_state`) instead of the current time. An invalid value
+  exits 2.
+
+### Behavior
+
+- `--billing-plan` exits 2 with nothing on stdout when combined with
+  `--rates`, `--format csv`, an `--agent` list without `claude`, a missing
+  `--since` or `--until`, or `since >= until`, and when the plan cannot be
+  read, fails validation or would need rounding mid-calculation.
+- `measure` and `export` have no billing plan option, deliberately: a
+  per-session internal cost would mean allocating a window-level charge
+  across sessions.
+
+### Security notes
+
+- The plan file must be a regular file owned by the current user with no
+  group/other permission bits (e.g. `chmod 600`), reached without any
+  symlink in its path, and not inside a git repository or worktree (no
+  `.git` entry in any ancestor directory). It is opened with `O_NOFOLLOW`
+  and re-checked with `fstat` before being read from that descriptor.
+- Error messages name a field, a period index or a rule only -- never a plan
+  value, the plan's path or its file name.
+- Output produced with `--billing-plan` is confidential. agent-cost has no
+  redaction; keep it out of shared logs, CI, artifacts and ledgers.
+
 ## 0.4.0
 
 Adds `claude-haiku-5-5`, whose price depends on each request's prompt length,

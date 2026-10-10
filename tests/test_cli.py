@@ -1,7 +1,12 @@
 import itertools
 import json
+import os
+import re
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
 
 from agent_cost import cli
 from agent_cost.facts import SOURCE_QUALITY_VALUES
@@ -830,3 +835,303 @@ def test_rates_validate_packaged_catalog_with_prompt_tiers_exits_zero(capsys):
     rc = cli.main(["rates", "validate"])
     assert rc == 0
     assert "catalog_version=2026-10-09" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# report --billing-plan (0.5.0). Every amount and date below is fictional.
+
+_PLAN_SINCE = "2026-06-01T00:00:00+00:00"
+_PLAN_UNTIL = "2026-07-01T00:00:00+00:00"
+
+
+def _billing_plan_dict():
+    return {
+        "plan_schema_version": "1",
+        "plan_id": "bp-cli",
+        "nonce": "0123456789abcdef0123456789abcdef",
+        "applies_to": {"agent": "claude", "scope": "seat"},
+        "basis": "agent-cost-list-price",
+        "periods": [
+            {
+                "period_id": "p1",
+                "effective_from": "2026-06-01T00:00:00+00:00",
+                "window_subscription_usd": "3",
+                "allowance_usd": None,
+                "overage": None,
+            },
+            {
+                "period_id": "p2",
+                "effective_from": "2026-06-11T00:00:00+00:00",
+                "window_subscription_usd": "10",
+                "allowance_usd": "50",
+                "overage": {"type": "charge_multiplier", "value": "0.5"},
+            },
+            {"period_id": "end", "effective_from": "2026-07-01T00:00:00+00:00", "terminates": True},
+        ],
+    }
+
+
+def _write_billing_plan(tmp_path, data=None, mode=0o600):
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(data if data is not None else _billing_plan_dict()))
+    os.chmod(path, mode)
+    return path
+
+
+def _billing_setup(tmp_path, monkeypatch):
+    claude_home, codex_home = _setup_env(tmp_path, monkeypatch)
+    monkeypatch.delenv("AGENT_COST_NOW", raising=False)
+    _write_claude_session(
+        claude_home,
+        "-Users-a-work-proj",
+        "s1.jsonl",
+        [
+            # 12M input tokens of claude-opus-4-8 at $5 / MTok = $60 in p2.
+            _assistant_event("2026-06-15T00:00:00Z", "claude-opus-4-8", 12_000_000, 0),
+            # $5 in p1 (allowance null).
+            _assistant_event("2026-06-05T00:00:00Z", "claude-opus-4-8", 1_000_000, 0),
+        ],
+    )
+    return claude_home, codex_home, _write_billing_plan(tmp_path)
+
+
+def _billing_args(plan_path, *extra):
+    return [
+        "report",
+        "--billing-plan",
+        str(plan_path),
+        "--since",
+        _PLAN_SINCE,
+        "--until",
+        _PLAN_UNTIL,
+        *extra,
+    ]
+
+
+def test_billing_plan_json_has_internal_billing(tmp_path, monkeypatch, capsys):
+    _claude_home, _codex_home, plan_path = _billing_setup(tmp_path, monkeypatch)
+    rc = cli.main(_billing_args(plan_path, "--format", "json"))
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    # Existing keys are unchanged; internal_billing is added.
+    assert set(payload) == {
+        "schema_version",
+        "generated_at",
+        "window",
+        "timezone",
+        "rates",
+        "group_by",
+        "data_quality",
+        "rows",
+        "internal_billing",
+    }
+    ib = payload["internal_billing"]
+    assert ib["calc_schema_version"] == "1"
+    assert ib["plan_id"] == "bp-cli"
+    assert re.match(r"^[0-9a-f]{64}$", ib["revision_id"])
+    assert ib["basis"] == "agent-cost-list-price"
+    assert ib["catalog_version"] == payload["rates"]["catalog_version"]
+    assert ib["catalog_sha256"] == payload["rates"]["sha256"]
+    assert ib["since"] == _PLAN_SINCE
+    assert ib["until"] == _PLAN_UNTIL
+    assert ib["generated_at"] == payload["generated_at"]
+    assert ib["plan_coverage"] == "full"
+    assert ib["uncovered"] == []
+
+    windows = {w["period_id"]: w for w in ib["windows"]}
+    assert [w["period_id"] for w in ib["windows"]] == ["p1", "p2"]
+    p1, p2 = windows["p1"], windows["p2"]
+    assert p1["allowance_usd"] is None
+    assert p1["list_cost_usd"] == "5.0000"
+    assert p1["overage_usd"] == "0.0000"
+    assert p1["internal_cost_usd"] == "3.0000"
+    assert p2["list_cost_usd"] == "60.0000"
+    assert p2["allowance_usd"] == "50.0000"
+    assert p2["overage_usd"] == "10.0000"
+    assert p2["overage_cost_usd"] == "5.0000"
+    assert p2["window_subscription_usd"] == "10.0000"
+    assert p2["internal_cost_usd"] == "15.0000"
+    assert p2["fact_count"] >= 1 and isinstance(p2["fact_count"], int)
+    assert p2["query_coverage"] == "full"
+    assert p2["window_state"] == "closed"
+    assert p2["list_cost_pricing"] == "priced"
+    assert p2["internal_cost_certainty"] == "estimate"
+    for w in ib["windows"]:
+        for key in ("list_cost_usd", "overage_usd", "overage_cost_usd", "window_subscription_usd", "internal_cost_usd"):
+            assert isinstance(w[key], str) and re.match(r"^\d+\.\d{4}$", w[key]), (key, w[key])
+
+
+def test_billing_plan_table_has_confidential_section(tmp_path, monkeypatch, capsys):
+    _claude_home, _codex_home, plan_path = _billing_setup(tmp_path, monkeypatch)
+    rc = cli.main(_billing_args(plan_path, "--format", "table"))
+    assert rc == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    header = [l for l in lines if l.startswith("Internal billing (CONFIDENTIAL -- do not share):")]
+    assert len(header) == 1
+    assert "plan bp-cli rev " in header[0]
+    assert "basis agent-cost-list-price" in header[0]
+    assert "plan_coverage full" in header[0]
+    after = lines[lines.index(header[0]) :]
+    assert any(l.startswith("p2 ") and "15.0000" in l and "estimate" in l for l in after)
+    assert any(l.startswith("p1 ") and " - " in l for l in after)  # null allowance -> "-"
+    # The confidential section comes after the regular report.
+    assert out.index("Total tokens:") < out.index("Internal billing (CONFIDENTIAL")
+
+
+def test_billing_plan_table_lists_uncovered_ranges(tmp_path, monkeypatch, capsys):
+    _claude_home, _codex_home, plan_path = _billing_setup(tmp_path, monkeypatch)
+    rc = cli.main(
+        [
+            "report",
+            "--billing-plan",
+            str(plan_path),
+            "--since",
+            "2026-05-25T00:00:00+00:00",
+            "--until",
+            _PLAN_UNTIL,
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "plan_coverage partial" in out
+    assert "uncovered: 2026-05-25T00:00:00+00:00 .. 2026-06-01T00:00:00+00:00" in out
+
+
+def test_report_without_billing_plan_has_no_internal_billing(tmp_path, monkeypatch, capsys):
+    _billing_setup(tmp_path, monkeypatch)
+    rc = cli.main(["report", "--format", "json", "--since", _PLAN_SINCE, "--until", _PLAN_UNTIL])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "internal_billing" not in payload
+
+    rc = cli.main(["report", "--format", "table"])
+    assert rc == 0
+    assert "Internal billing" not in capsys.readouterr().out
+
+
+def test_billing_plan_combination_rules_exit_2_with_empty_stdout(tmp_path, monkeypatch, capsys):
+    _claude_home, _codex_home, plan_path = _billing_setup(tmp_path, monkeypatch)
+    rates_path = tmp_path / "rates.json"
+    rates_path.write_text((Path(cli.__file__).parent / "rates.json").read_text())
+    p = str(plan_path)
+    cases = [
+        _billing_args(plan_path, "--rates", str(rates_path)),
+        _billing_args(plan_path, "--format", "csv"),
+        _billing_args(plan_path, "--agent", "codex"),
+        ["report", "--billing-plan", p, "--until", _PLAN_UNTIL],
+        ["report", "--billing-plan", p, "--since", _PLAN_SINCE],
+        ["report", "--billing-plan", p],
+        ["report", "--billing-plan", p, "--since", _PLAN_UNTIL, "--until", _PLAN_UNTIL],
+        ["report", "--billing-plan", p, "--since", _PLAN_UNTIL, "--until", _PLAN_SINCE],
+    ]
+    for argv in cases:
+        rc = cli.main(argv)
+        captured = capsys.readouterr()
+        assert rc == 2, argv
+        assert captured.out == "", argv
+        assert captured.err.startswith("[error] --billing-plan: "), argv
+        assert str(tmp_path) not in captured.err
+
+
+def test_billing_plan_agent_list_including_claude_is_allowed(tmp_path, monkeypatch, capsys):
+    _claude_home, _codex_home, plan_path = _billing_setup(tmp_path, monkeypatch)
+    rc = cli.main(_billing_args(plan_path, "--format", "json", "--agent", "codex,claude"))
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "internal_billing" in payload
+
+
+def test_billing_plan_invalid_plan_exit_2_with_empty_stdout(tmp_path, monkeypatch, capsys):
+    _claude_home, _codex_home, _plan_path = _billing_setup(tmp_path, monkeypatch)
+    bad = _billing_plan_dict()
+    bad["periods"][1]["allowance_usd"] = 4242.4242
+    bad_path = _write_billing_plan(tmp_path, bad)
+    rc = cli.main(_billing_args(bad_path, "--format", "json"))
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert "4242.4242" not in captured.err
+    assert str(tmp_path) not in captured.err
+    assert "plan.json" not in captured.err
+
+
+def test_billing_plan_insecure_file_exit_2_with_empty_stdout(tmp_path, monkeypatch, capsys):
+    _claude_home, _codex_home, plan_path = _billing_setup(tmp_path, monkeypatch)
+    os.chmod(plan_path, 0o644)
+    rc = cli.main(_billing_args(plan_path, "--format", "json"))
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert str(tmp_path) not in captured.err
+
+
+def test_billing_plan_missing_file_exit_2_with_empty_stdout(tmp_path, monkeypatch, capsys):
+    _billing_setup(tmp_path, monkeypatch)
+    rc = cli.main(_billing_args(tmp_path / "nope.json", "--format", "json"))
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert str(tmp_path) not in captured.err
+
+
+def test_agent_cost_now_drives_generated_at_and_window_state(tmp_path, monkeypatch, capsys):
+    _claude_home, _codex_home, plan_path = _billing_setup(tmp_path, monkeypatch)
+
+    monkeypatch.setenv("AGENT_COST_NOW", "2026-06-20T09:00:00+09:00")
+    rc = cli.main(_billing_args(plan_path, "--format", "json"))
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["generated_at"] == "2026-06-20T00:00:00+00:00"
+    ib = payload["internal_billing"]
+    assert ib["generated_at"] == "2026-06-20T00:00:00+00:00"
+    states = {w["period_id"]: w["window_state"] for w in ib["windows"]}
+    assert states == {"p1": "closed", "p2": "open"}
+    assert {w["period_id"]: w["internal_cost_certainty"] for w in ib["windows"]}["p2"] == "lower_bound"
+
+    # until_w == generated_at -> closed.
+    monkeypatch.setenv("AGENT_COST_NOW", _PLAN_UNTIL)
+    rc = cli.main(_billing_args(plan_path, "--format", "json"))
+    assert rc == 0
+    ib = json.loads(capsys.readouterr().out)["internal_billing"]
+    assert {w["period_id"]: w["window_state"] for w in ib["windows"]} == {"p1": "closed", "p2": "closed"}
+
+
+def test_agent_cost_now_applies_without_billing_plan(tmp_path, monkeypatch, capsys):
+    _setup_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("AGENT_COST_NOW", "2026-06-20T00:00:00+00:00")
+    assert cli.main(["report", "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["generated_at"] == "2026-06-20T00:00:00+00:00"
+    assert cli.main(["measure", "--session-id", "x"]) == 0
+    assert json.loads(capsys.readouterr().out)["generated_at"] == "2026-06-20T00:00:00+00:00"
+
+
+def test_agent_cost_now_keeps_sub_second_precision(tmp_path, monkeypatch, capsys):
+    _setup_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("AGENT_COST_NOW", "2026-06-20T00:00:00.123456+00:00")
+    assert cli.main(["report", "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["generated_at"] == "2026-06-20T00:00:00.123456+00:00"
+
+
+def test_invalid_agent_cost_now_exit_2(tmp_path, monkeypatch, capsys):
+    _claude_home, _codex_home, plan_path = _billing_setup(tmp_path, monkeypatch)
+    for value in ("not-a-time", "2026-06-20T00:00:00"):
+        monkeypatch.setenv("AGENT_COST_NOW", value)
+        for argv in (
+            _billing_args(plan_path, "--format", "json"),
+            ["report", "--format", "json"],
+            ["measure", "--session-id", "x"],
+        ):
+            rc = cli.main(argv)
+            captured = capsys.readouterr()
+            assert rc == 2, (value, argv)
+            assert captured.out == "", (value, argv)
+            assert "AGENT_COST_NOW" in captured.err
+
+
+def test_report_help_mentions_billing_plan(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["report", "--help"])
+    out = capsys.readouterr().out
+    assert "--billing-plan PATH" in out
