@@ -220,8 +220,8 @@ A plan (`plan_schema_version` `"1"`; every value below is made up):
   allowance), and then `overage` must be `null` too.
 - `overage` prices `max(0, list_cost - allowance)`:
   `{"type": "charge_multiplier", "value": "0.5"}` charges overage × value
-  (`0 <= value <= 1`), and `{"type": "block_discount", "block_usd": "3",
-  "discount_usd": "2"}` charges overage minus `floor(overage / block_usd) ×
+  (`0 <= value <= 1`), and `{"type": "block_discount", "block_usd": "5",
+  "discount_usd": "1"}` charges overage minus `floor(overage / block_usd) ×
   discount_usd` (`0 < discount_usd <= block_usd`).
 - Amounts are decimal strings only (no JSON numbers), at most 28
   significant digits. `plan_id` is `[A-Za-z0-9_-]{1,32}`, `period_id`

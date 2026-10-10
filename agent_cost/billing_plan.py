@@ -147,8 +147,11 @@ def _read_plan_bytes(path) -> bytes:
     if not hasattr(os, "getuid") or not hasattr(os, "O_NOFOLLOW"):
         raise BillingPlanError("billing plans are not supported on this platform")
 
-    expanded = os.path.abspath(os.path.expanduser(os.fspath(path)))
-    real = os.path.realpath(expanded)
+    try:
+        expanded = os.path.abspath(os.path.expanduser(os.fspath(path)))
+        real = os.path.realpath(expanded)
+    except OSError:
+        raise BillingPlanError("plan path could not be resolved") from None
     if real != expanded:
         raise BillingPlanError("plan path must not go through a symlink")
 
@@ -169,8 +172,12 @@ def _read_plan_bytes(path) -> bytes:
         fd = os.open(expanded, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
     except OSError:
         raise BillingPlanError("plan file could not be opened") from None
+    close_failed = False
     try:
-        after = os.fstat(fd)
+        try:
+            after = os.fstat(fd)
+        except OSError:
+            raise BillingPlanError("plan file could not be inspected") from None
         if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino) or not stat.S_ISREG(after.st_mode):
             raise BillingPlanError("plan file changed while it was being opened")
         if after.st_uid != os.getuid():
@@ -187,7 +194,14 @@ def _read_plan_bytes(path) -> bytes:
                 break
             chunks.append(chunk)
     finally:
-        os.close(fd)
+        try:
+            os.close(fd)
+        except OSError:
+            # Raised after the finally block so a pending BillingPlanError
+            # is not replaced by this one.
+            close_failed = True
+    if close_failed:
+        raise BillingPlanError("plan file could not be closed")
     return b"".join(chunks)
 
 
@@ -388,7 +402,10 @@ def parse_billing_plan(text: str) -> BillingPlan:
 
 
 def _canonical_decimal(d: Decimal) -> str:
-    return "0" if d == 0 else format(d.normalize(), "f")
+    # A fresh context, so a caller's low precision or traps cannot round or
+    # reject a value that validation accepted (at most 28 digits).
+    with decimal.localcontext(decimal.Context(prec=_CALC_PREC, rounding=ROUND_HALF_EVEN, traps=[])):
+        return "0" if d == 0 else format(d.normalize(), "f")
 
 
 def _canonical_time(dt: datetime) -> str:
@@ -561,14 +578,6 @@ def compute_internal_billing(
     since = since.astimezone(timezone.utc)
     until = until.astimezone(timezone.utc)
     generated_at = generated_at.astimezone(timezone.utc)
-    # Priced in the caller's decimal context, exactly as build_rows does, so
-    # list_cost is the same Decimal a plain report would have summed.
-    priced_facts = []
-    for f in facts:
-        if f.agent == "claude" and since <= f.occurred_at_utc < until:
-            cost, status, _credits = price_fact(catalog, f)
-            priced_facts.append((f, cost, status))
-
     windows = []
     with decimal.localcontext() as ctx:
         ctx.prec = _CALC_PREC
@@ -576,6 +585,15 @@ def compute_internal_billing(
         ctx.traps[decimal.Inexact] = True
         ctx.traps[decimal.Rounded] = True
         try:
+            # Priced in the same trapped context as the sums, so a fact whose
+            # price would round at the default precision is an error too.
+            # Within normal token counts this is the same Decimal build_rows
+            # would have summed.
+            priced_facts = []
+            for f in facts:
+                if f.agent == "claude" and since <= f.occurred_at_utc < until:
+                    cost, status, _credits = price_fact(catalog, f)
+                    priced_facts.append((f, cost, status))
             for window in plan.windows:
                 if max(since, window.effective_from) < min(until, window.until):
                     windows.append(

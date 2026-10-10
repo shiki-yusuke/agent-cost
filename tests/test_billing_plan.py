@@ -123,16 +123,16 @@ def test_frozen_dataclasses(tmp_path):
 
 def test_block_discount_overage_parses(tmp_path):
     data = _base_plan()
-    data["periods"][1]["overage"] = {"type": "block_discount", "block_usd": "3", "discount_usd": "2"}
+    data["periods"][1]["overage"] = {"type": "block_discount", "block_usd": "5", "discount_usd": "1"}
     plan = bp.load_billing_plan(_write_plan(tmp_path, data))
     overage = plan.windows[1].overage
     assert isinstance(overage, bp.OverageBlockDiscount)
-    assert overage.block_usd == Decimal("3") and overage.discount_usd == Decimal("2")
+    assert overage.block_usd == Decimal("5") and overage.discount_usd == Decimal("1")
 
 
 def test_block_discount_equal_discount_and_block_is_allowed(tmp_path):
     data = _base_plan()
-    data["periods"][1]["overage"] = {"type": "block_discount", "block_usd": "3", "discount_usd": "3"}
+    data["periods"][1]["overage"] = {"type": "block_discount", "block_usd": "5", "discount_usd": "5"}
     bp.load_billing_plan(_write_plan(tmp_path, data))
 
 
@@ -250,7 +250,7 @@ REJECTED_MUTATIONS = {
     "overage_extra_key_block": _set_period(
         1,
         "overage",
-        {"type": "block_discount", "block_usd": "3", "discount_usd": "2", "value": SENTINEL},
+        {"type": "block_discount", "block_usd": "5", "discount_usd": "1", "value": SENTINEL},
     ),
     "overage_missing_key_block": _set_period(1, "overage", {"type": "block_discount", "block_usd": SENTINEL}),
     "overage_missing_type": _set_period(1, "overage", {"value": SENTINEL}),
@@ -271,9 +271,11 @@ REJECTED_MUTATIONS = {
     "multiplier_above_one": _set_period(1, "overage", {"type": "charge_multiplier", "value": SENTINEL}),
     "multiplier_negative": _set_period(1, "overage", {"type": "charge_multiplier", "value": "-0.5"}),
     "block_discount_greater_than_block": _set_period(
-        1, "overage", {"type": "block_discount", "block_usd": "3", "discount_usd": SENTINEL}
+        1, "overage", {"type": "block_discount", "block_usd": "5", "discount_usd": SENTINEL}
     ),
-    "block_usd_zero": _set_period(1, "overage", {"type": "block_discount", "block_usd": "0", "discount_usd": "0"}),
+    "block_usd_zero": _set_period(
+        1, "overage", {"type": "block_discount", "block_usd": "0", "discount_usd": SENTINEL}
+    ),
     "discount_usd_zero": _set_period(
         1, "overage", {"type": "block_discount", "block_usd": SENTINEL, "discount_usd": "0"}
     ),
@@ -388,6 +390,21 @@ def test_error_message_names_the_field(tmp_path):
 def test_error_message_names_the_rule_for_ordering(tmp_path):
     exc = _load_rejected(tmp_path, _mutate(REJECTED_MUTATIONS["effective_from_descending"]))
     assert "effective_from" in str(exc)
+
+
+@pytest.mark.parametrize(
+    "case, rule",
+    [
+        ("block_usd_zero", "periods[1].overage.block_usd: must be > 0"),
+        ("discount_usd_zero", "periods[1].overage.discount_usd: must be > 0"),
+        ("block_discount_greater_than_block", "periods[1].overage.discount_usd: must be <= block_usd"),
+    ],
+)
+def test_block_discount_rules_name_their_own_rule(case, rule, tmp_path):
+    # Each case breaks exactly one rule, so dropping that rule's check makes
+    # the case fall through to another message (or be accepted).
+    exc = _load_rejected(tmp_path, _mutate(REJECTED_MUTATIONS[case]))
+    assert str(exc) == rule
 
 
 def test_billing_plan_error_is_value_error():
@@ -525,6 +542,75 @@ def test_fstat_mismatch_after_open_rejected(tmp_path, monkeypatch):
     _assert_no_leak(info.value, path)
 
 
+def _oserror_on(path: Path) -> OSError:
+    return OSError(5, "simulated I/O error", str(path))
+
+
+def test_realpath_oserror_is_billing_plan_error(tmp_path, monkeypatch):
+    path = _write_plan(tmp_path, _base_plan())
+
+    def failing_realpath(p, *args, **kwargs):
+        raise _oserror_on(path)
+
+    monkeypatch.setattr(bp.os.path, "realpath", failing_realpath)
+    with pytest.raises(bp.BillingPlanError) as info:
+        bp.load_billing_plan(path)
+    _assert_no_leak(info.value, path)
+
+
+def test_fstat_oserror_is_billing_plan_error(tmp_path, monkeypatch):
+    path = _write_plan(tmp_path, _base_plan())
+
+    def failing_fstat(fd):
+        raise _oserror_on(path)
+
+    monkeypatch.setattr(bp.os, "fstat", failing_fstat)
+    with pytest.raises(bp.BillingPlanError) as info:
+        bp.load_billing_plan(path)
+    _assert_no_leak(info.value, path)
+
+
+def test_read_oserror_is_billing_plan_error(tmp_path, monkeypatch):
+    path = _write_plan(tmp_path, _base_plan())
+
+    def failing_read(fd, n):
+        raise _oserror_on(path)
+
+    monkeypatch.setattr(bp.os, "read", failing_read)
+    with pytest.raises(bp.BillingPlanError) as info:
+        bp.load_billing_plan(path)
+    _assert_no_leak(info.value, path)
+
+
+def test_close_oserror_is_billing_plan_error(tmp_path, monkeypatch):
+    path = _write_plan(tmp_path, _base_plan())
+    real_close = os.close
+
+    def failing_close(fd):
+        real_close(fd)
+        raise _oserror_on(path)
+
+    monkeypatch.setattr(bp.os, "close", failing_close)
+    with pytest.raises(bp.BillingPlanError) as info:
+        bp.load_billing_plan(path)
+    _assert_no_leak(info.value, path)
+
+
+def test_close_oserror_does_not_replace_an_earlier_error(tmp_path, monkeypatch):
+    path = _write_plan(tmp_path, _base_plan(), mode=0o644)
+    real_close = os.close
+
+    def failing_close(fd):
+        real_close(fd)
+        raise _oserror_on(path)
+
+    monkeypatch.setattr(bp.os, "close", failing_close)
+    with pytest.raises(bp.BillingPlanError) as info:
+        bp.load_billing_plan(path)
+    assert "chmod 600" in str(info.value)
+    _assert_no_leak(info.value, path)
+
+
 def test_tilde_path_is_expanded(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_plan(tmp_path, _base_plan())
@@ -585,7 +671,7 @@ def test_revision_id_matches_canonical_form():
 
 def test_revision_id_matches_canonical_form_with_block_discount():
     data = _base_plan()
-    data["periods"][1]["overage"] = {"type": "block_discount", "block_usd": "3.0", "discount_usd": "2.00"}
+    data["periods"][1]["overage"] = {"type": "block_discount", "block_usd": "5.0", "discount_usd": "1.00"}
     plan = bp.parse_billing_plan(json.dumps(data))
     assert bp.revision_id(plan) == _expected_revision_id(data)
 
@@ -615,6 +701,22 @@ def test_revision_id_uses_normalized_values():
     assert bp.revision_id(bp.parse_billing_plan(json.dumps(data))) == base
 
 
+def test_revision_id_is_independent_of_the_caller_context():
+    import decimal
+
+    data = _base_plan()
+    data["periods"][1]["allowance_usd"] = "1234567890.123456789012345678"  # 28 digits
+    plan = bp.parse_billing_plan(json.dumps(data))
+    base = bp.revision_id(plan)
+    assert base == _expected_revision_id(data)
+    with decimal.localcontext() as ctx:
+        ctx.prec = 10
+        assert bp.revision_id(plan) == base
+        ctx.traps[decimal.Inexact] = True
+        ctx.traps[decimal.Rounded] = True
+        assert bp.revision_id(plan) == base
+
+
 def test_revision_id_changes_with_nonce_value_and_windows():
     data = _base_plan()
     base = bp.revision_id(bp.parse_billing_plan(json.dumps(data)))
@@ -626,7 +728,7 @@ def test_revision_id_changes_with_nonce_value_and_windows():
     other_window = copy.deepcopy(data)
     other_window["periods"].insert(2, _regular("p3", "2030-01-21T00:00:00+00:00", sub="1", allowance=None))
     other_overage = copy.deepcopy(data)
-    other_overage["periods"][1]["overage"] = {"type": "block_discount", "block_usd": "3", "discount_usd": "2"}
+    other_overage["periods"][1]["overage"] = {"type": "block_discount", "block_usd": "5", "discount_usd": "1"}
 
     ids = {
         bp.revision_id(bp.parse_billing_plan(json.dumps(d)))
@@ -689,7 +791,7 @@ def _plan_with(overage_b=None, allowance_b="50", sub_a="3", sub_b="10"):
     return bp.parse_billing_plan(json.dumps(data))
 
 
-def _block(block="3", discount="2"):
+def _block(block="5", discount="1"):
     return {"type": "block_discount", "block_usd": block, "discount_usd": discount}
 
 
@@ -773,14 +875,15 @@ def test_charge_multiplier(catalog):
 @pytest.mark.parametrize(
     "list_cost, overage, overage_cost",
     [
-        ("52.9999", "2.9999", "2.9999"),  # under one block: no discount
-        ("53", "3", "1"),  # exactly one block: one discount
-        ("57.5", "7.5", "3.5"),  # two whole blocks plus a remainder
-        ("52.999999", "2.999999", "2.999999"),  # rounds to 3.0000 but is still < 1 block
+        ("54.9999", "4.9999", "4.9999"),  # under one block: no discount
+        ("55", "5", "4"),  # exactly one block: one discount
+        ("60", "10", "8"),  # exactly two blocks: two discounts
+        ("62.5", "12.5", "10.5"),  # two whole blocks plus a remainder
+        ("54.999999", "4.999999", "4.999999"),  # rounds to 5.0000 but is still < 1 block
     ],
 )
 def test_block_discount_floor(catalog, list_cost, overage, overage_cost):
-    result = _compute(_plan_with(_block("3", "2")), [_fact("2030-01-15T00:00:00+00:00", list_cost)], catalog)
+    result = _compute(_plan_with(_block("5", "1")), [_fact("2030-01-15T00:00:00+00:00", list_cost)], catalog)
     w = _window(result, "p2")
     assert w["overage_usd"] == Decimal(overage)
     assert w["overage_cost_usd"] == Decimal(overage_cost)
@@ -788,13 +891,13 @@ def test_block_discount_floor(catalog, list_cost, overage, overage_cost):
 
 
 def test_block_discount_boundary_is_decided_before_output_rounding(catalog):
-    result = _compute(_plan_with(_block("3", "2")), [_fact("2030-01-15T00:00:00+00:00", "52.999999")], catalog)
+    result = _compute(_plan_with(_block("5", "1")), [_fact("2030-01-15T00:00:00+00:00", "54.999999")], catalog)
     formatted = bp.format_internal_billing(result)
     w = [x for x in formatted["windows"] if x["period_id"] == "p2"][0]
-    # The overage prints as 3.0000 but was not counted as a whole block.
-    assert w["overage_usd"] == "3.0000"
-    assert w["overage_cost_usd"] == "3.0000"
-    assert w["internal_cost_usd"] == "13.0000"
+    # The overage prints as 5.0000 but was not counted as a whole block.
+    assert w["overage_usd"] == "5.0000"
+    assert w["overage_cost_usd"] == "5.0000"
+    assert w["internal_cost_usd"] == "15.0000"
 
 
 def test_allowance_null_has_no_overage(catalog):
@@ -917,7 +1020,7 @@ def test_no_usage_observed(catalog):
     [
         (None, None, "lower_bound"),
         ("50", _mult("0.5"), "lower_bound"),
-        ("50", _block("3", "2"), "indeterminate"),
+        ("50", _block("5", "1"), "indeterminate"),
     ],
 )
 def test_no_usage_observed_certainty(catalog, allowance, overage, expected):
@@ -1078,6 +1181,48 @@ def test_arithmetic_trap_is_a_billing_plan_error(catalog):
     with pytest.raises(bp.BillingPlanError) as info:
         _compute(plan, facts, catalog)
     assert "0.1234567890123456789012345678" not in str(info.value)
+
+
+@pytest.fixture
+def catalog_1234(tmp_path):
+    rates = copy.deepcopy(_TEST_RATES)
+    rates["models"][0]["rates"][0]["input_nocache"] = "1.234"
+    path = tmp_path / "rates-1234.json"
+    path.write_text(json.dumps(rates))
+    return load_rates(path)
+
+
+def test_price_fact_rounding_traps_inside_compute(catalog_1234):
+    # p1 has no allowance, so the only arithmetic that can round is
+    # price_fact's tokens / 1e6 * 1.234: 61 significant digits > prec 60.
+    facts = [_fact("2030-01-05T00:00:00+00:00", tokens=10**57 + 1)]
+    with pytest.raises(bp.BillingPlanError) as info:
+        _compute(_plan_with(), facts, catalog_1234)
+    assert "would round" in str(info.value)
+
+
+def test_price_fact_runs_at_calc_precision_under_a_trapping_caller(catalog_1234):
+    import decimal
+
+    # 31 significant digits: inexact at the default prec 28, exact at 60.
+    facts = [_fact("2030-01-05T00:00:00+00:00", tokens=10**27 + 1)]
+    with decimal.localcontext() as ctx:
+        ctx.prec = 28
+        ctx.traps[decimal.Inexact] = True
+        ctx.traps[decimal.Rounded] = True
+        result = _compute(_plan_with(), facts, catalog_1234)
+    assert _window(result, "p1")["list_cost_usd"] == Decimal("1234000000000000000000.000001234")
+
+
+def test_price_fact_at_normal_token_counts_does_not_trap(catalog_1234):
+    from agent_cost.aggregate import price_fact
+
+    fact = _fact("2030-01-05T00:00:00+00:00", tokens=10**12 + 1)
+    result = _compute(_plan_with(), [fact], catalog_1234)
+    w = _window(result, "p1")
+    assert w["list_cost_usd"] == Decimal("1234000.000001234")
+    # Same Decimal a plain report sums in the default context.
+    assert w["list_cost_usd"] == price_fact(catalog_1234, fact)[0]
 
 
 def test_compute_does_not_leak_context_changes(catalog):

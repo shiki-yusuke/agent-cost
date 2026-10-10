@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import decimal
 import json
 import os
 import sys
@@ -70,7 +71,7 @@ def _now_utc() -> datetime:
 
 
 def _billing_plan_conflict(args, agents: set, since, until) -> Optional[str]:
-    if args.rates:
+    if args.rates is not None:
         return "cannot be combined with --rates"
     if args.format == "csv":
         return "cannot be combined with --format csv"
@@ -136,7 +137,7 @@ def cmd_report(args) -> int:
     )
 
     plan = None
-    if args.billing_plan:
+    if args.billing_plan is not None:
         conflict = _billing_plan_conflict(args, agents, since, until)
         if conflict:
             print(f"[error] --billing-plan: {conflict}", file=sys.stderr)
@@ -148,7 +149,7 @@ def cmd_report(args) -> int:
         print("[error] invalid AGENT_COST_NOW (expected ISO 8601 with a UTC offset)", file=sys.stderr)
         return 2
 
-    if args.billing_plan:
+    if args.billing_plan is not None:
         try:
             plan = load_billing_plan(Path(args.billing_plan))
         except BillingPlanError as exc:
@@ -194,10 +195,14 @@ def cmd_report(args) -> int:
             block = compute_internal_billing(
                 plan, facts, catalog, since=since, until=until, generated_at=generated_at
             )
+            internal_billing = format_internal_billing(block)
         except BillingPlanError as exc:
             print(f"[error] --billing-plan: {exc}", file=sys.stderr)
             return 2
-        payload["internal_billing"] = format_internal_billing(block)
+        except decimal.DecimalException:
+            print("[error] --billing-plan: internal billing arithmetic failed", file=sys.stderr)
+            return 2
+        payload["internal_billing"] = internal_billing
 
     renderer = {"table": render_table, "csv": render_csv, "json": render_json}[args.format]
     print(renderer(payload))

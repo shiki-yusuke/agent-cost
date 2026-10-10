@@ -1,3 +1,4 @@
+import decimal
 import itertools
 import json
 import os
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_cost import cli
+from agent_cost import billing_plan, cli
 from agent_cost.facts import SOURCE_QUALITY_VALUES
 
 # These tests exercise report/measure/export/pricing behavior, not the
@@ -1073,6 +1074,47 @@ def test_billing_plan_missing_file_exit_2_with_empty_stdout(tmp_path, monkeypatc
     captured = capsys.readouterr()
     assert rc == 2
     assert captured.out == ""
+    assert str(tmp_path) not in captured.err
+
+
+def test_billing_plan_empty_path_exit_2_with_empty_stdout(tmp_path, monkeypatch, capsys):
+    _billing_setup(tmp_path, monkeypatch)
+    rc = cli.main(_billing_args("", "--format", "json"))
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert captured.err.startswith("[error] --billing-plan: ")
+
+
+def test_billing_plan_with_empty_rates_is_rejected(tmp_path, monkeypatch, capsys):
+    _claude_home, _codex_home, plan_path = _billing_setup(tmp_path, monkeypatch)
+    rc = cli.main(_billing_args(plan_path, "--format", "json", "--rates", ""))
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert captured.err == "[error] --billing-plan: cannot be combined with --rates\n"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        billing_plan.BillingPlanError("internal billing arithmetic would round; refusing to compute"),
+        decimal.InvalidOperation([decimal.InvalidOperation]),
+    ],
+)
+def test_billing_plan_format_failure_exit_2_without_traceback(tmp_path, monkeypatch, capsys, error):
+    _claude_home, _codex_home, plan_path = _billing_setup(tmp_path, monkeypatch)
+
+    def failing_format(block):
+        raise error
+
+    monkeypatch.setattr(cli, "format_internal_billing", failing_format)
+    rc = cli.main(_billing_args(plan_path, "--format", "json"))
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert captured.err.startswith("[error] --billing-plan: ")
+    assert "Traceback" not in captured.err
     assert str(tmp_path) not in captured.err
 
 
