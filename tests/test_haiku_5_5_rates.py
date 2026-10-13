@@ -79,7 +79,7 @@ def test_claude_haiku_5_5_cache_multipliers_are_standard_in_every_tier_and_no_fa
 
 def test_catalog_version_schema_version_and_sources_record_the_haiku_5_5_primary_sources():
     catalog = load_rates()
-    assert catalog.catalog_version == "2026-10-09"
+    assert catalog.catalog_version == "2026-10-13"
     assert catalog.schema_version == "2"
     urls = {(s.get("url"), s.get("retrieved_at")) for s in catalog.sources}
     assert ("https://platform.claude.com/docs/en/about-claude/pricing", "2026-10-09") in urls
