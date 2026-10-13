@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.2
+
+### Changed
+
+- `claude-sonnet-5-5` `cache_read` lowered from $0.20 to $0.10 per MTok
+  effective 2026-10-07 (catalog_version `2026-10-13`). The launch period now
+  ends at 2026-10-07T00:00:00Z and a new period starts there with the other
+  four values unchanged ($2 / $2.50 / $4 / $10). Sources:
+  anthropic.com/claude-haiku-5-5 (dated 2026-10-07: "starting today" Sonnet
+  5.5 cache reads cost $0.10 rather than $0.20), the pricing page (retrieved
+  2026-10-13: footnote 2, cache hits on Opus 5.5 and Sonnet 5.5 are 0.05x
+  base input) and Claude Code's 2.1.296 changelog entry. Catalog
+  `2026-10-09` overstated `claude-sonnet-5-5` cache-read cost 2x from
+  2026-10-07; regenerate reports covering that range. `claude-sonnet-5` is
+  unchanged. Rows before 2026-10-07 and every other model are identical to
+  0.5.1.
+
 ## 0.5.1
 
 ### Fixed

@@ -514,8 +514,10 @@ def test_packaged_catalog_only_claude_haiku_5_5_has_prompt_tiers():
 
 
 # sha256 of the packaged catalog's models other than claude-haiku-5-5, as
-# json.dumps(sort_keys=True, separators=(",", ":")).
-_EXISTING_MODELS_SHA256 = "f3bfe615ec748aaa6d443083a6fe87b87c3cfd8fac68b4dfc3e1f1608c2e90d9"
+# json.dumps(sort_keys=True, separators=(",", ":")). Updated deliberately in
+# 0.5.2: claude-sonnet-5-5's launch period gained effective_until 2026-10-07
+# and a cache_read-cut period was appended (was f3bfe615...2e90d9).
+_EXISTING_MODELS_SHA256 = "1f326f1446e013fef49070e22113f78875fb3f8e7e8a65bd7ed4c5ca819e61fa"
 
 
 def test_packaged_catalog_existing_models_are_unchanged():

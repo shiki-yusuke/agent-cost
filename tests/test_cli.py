@@ -886,7 +886,7 @@ def test_rates_show_model_without_tiers_prints_no_prompt_tiers(capsys):
 def test_rates_validate_packaged_catalog_with_prompt_tiers_exits_zero(capsys):
     rc = cli.main(["rates", "validate"])
     assert rc == 0
-    assert "catalog_version=2026-10-09" in capsys.readouterr().out
+    assert "catalog_version=2026-10-13" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
