@@ -11,13 +11,22 @@ permissions:
 jobs:
   test:
     name: Python ${{ matrix.python }}
-    runs-on: ubuntu-latest
+    # os を持たない組み合わせは ubuntu-latest で走る (include で os を足した行だけ固定)。
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
         # pyproject の classifiers が宣言しているバージョンと一致させる。
         # 宣言だけして検証しない状態を作らないため、行を増やす時は classifiers も直す。
         python: ["3.9", "3.10", "3.11", "3.12"]
+        include:
+          # ubuntu-latest は 2026-10-19〜11-19 に Ubuntu 26.04 へ移行する
+          # (actions/runner-images#14748)。Python 3.9 は EOL 済みで
+          # actions/python-versions に 26.04 向けビルドが無く、setup-python が
+          # 取得に失敗するため 3.9 だけ 24.04 に固定する。3.9 を classifiers から
+          # 外す時はこの include ごと消す。
+          - python: "3.9"
+            os: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
