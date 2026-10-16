@@ -18,7 +18,7 @@ jobs:
       matrix:
         # pyproject の classifiers が宣言しているバージョンと一致させる。
         # 宣言だけして検証しない状態を作らないため、行を増やす時は classifiers も直す。
-        python: ["3.9", "3.10", "3.11", "3.12"]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
         include:
           # ubuntu-latest は 2026-10-19〜11-19 に Ubuntu 26.04 へ移行する
           # (actions/runner-images#14748)。Python 3.9 は EOL 済みで
