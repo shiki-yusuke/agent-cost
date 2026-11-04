@@ -13,6 +13,8 @@ import copy
 import hashlib
 import json
 import os
+
+_REAL_FSTAT = os.fstat
 import traceback
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -583,11 +585,24 @@ def test_realpath_oserror_is_billing_plan_error(tmp_path, monkeypatch):
     _assert_no_leak(info.value, path)
 
 
+def _is_fd_of(fd, path):
+    """True when fd refers to path. Keeps fakes scoped to the plan file: pytest's
+    capture machinery calls os.fstat/os.read/os.close on its own fds (pytest 9.2+)."""
+    try:
+        st = _REAL_FSTAT(fd)
+    except OSError:
+        return False
+    target = os.stat(path)
+    return (st.st_dev, st.st_ino) == (target.st_dev, target.st_ino)
+
+
 def test_fstat_oserror_is_billing_plan_error(tmp_path, monkeypatch):
     path = _write_plan(tmp_path, _base_plan())
 
     def failing_fstat(fd):
-        raise _oserror_on(path)
+        if _is_fd_of(fd, path):
+            raise _oserror_on(path)
+        return _REAL_FSTAT(fd)
 
     monkeypatch.setattr(bp.os, "fstat", failing_fstat)
     with pytest.raises(bp.BillingPlanError) as info:
@@ -598,8 +613,12 @@ def test_fstat_oserror_is_billing_plan_error(tmp_path, monkeypatch):
 def test_read_oserror_is_billing_plan_error(tmp_path, monkeypatch):
     path = _write_plan(tmp_path, _base_plan())
 
+    real_read = os.read
+
     def failing_read(fd, n):
-        raise _oserror_on(path)
+        if _is_fd_of(fd, path):
+            raise _oserror_on(path)
+        return real_read(fd, n)
 
     monkeypatch.setattr(bp.os, "read", failing_read)
     with pytest.raises(bp.BillingPlanError) as info:
@@ -612,8 +631,10 @@ def test_close_oserror_is_billing_plan_error(tmp_path, monkeypatch):
     real_close = os.close
 
     def failing_close(fd):
+        mine = _is_fd_of(fd, path)
         real_close(fd)
-        raise _oserror_on(path)
+        if mine:
+            raise _oserror_on(path)
 
     monkeypatch.setattr(bp.os, "close", failing_close)
     with pytest.raises(bp.BillingPlanError) as info:
@@ -626,8 +647,10 @@ def test_close_oserror_does_not_replace_an_earlier_error(tmp_path, monkeypatch):
     real_close = os.close
 
     def failing_close(fd):
+        mine = _is_fd_of(fd, path)
         real_close(fd)
-        raise _oserror_on(path)
+        if mine:
+            raise _oserror_on(path)
 
     monkeypatch.setattr(bp.os, "close", failing_close)
     with pytest.raises(bp.BillingPlanError) as info:
