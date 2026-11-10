@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `claude-fable-5-2` and `claude-mythos-5-2` rate entries (catalog_version
+  `2026-11-10`), effective 2026-11-09 (official announcement date): $8 input /
+  $0.20 cache read (0.025x) / $10 5m cache write / $16 1h cache write / $40
+  output per MTok, fast mode 2x ($16 / $80). Separate entries, not aliases.
+  `claude-fable-5-1` is unchanged; `claude-mythos-5-1` stays unpriced until
+  its release date is confirmed.
+- `gpt-6.1-terra`, `gpt-6.1-sol` and `codex-auto-review` rate entries
+  (released in catalog_version `2026-11-10`; the intermediate `2026-11-09`
+  was never published); `codex-auto-review` is priced as `gpt-6.1-terra` by
+  a human decision (no published price).
+
 ## 0.5.2
 
 ### Changed
