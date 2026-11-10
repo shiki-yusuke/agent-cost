@@ -1,8 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.5.3
 
 ### Added
+
+Catalog entries only; no code or schema change. Every existing entry is
+identical to 0.5.2.
 
 - `claude-fable-5-2` and `claude-mythos-5-2` rate entries (catalog_version
   `2026-11-10`), effective 2026-11-09 (official announcement date): $8 input /
