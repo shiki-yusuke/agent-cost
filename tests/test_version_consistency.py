@@ -1,8 +1,8 @@
 """Spec: pyproject.toml's [project].version and agent_cost.__version__ must
-agree, and both must read "0.5.2" for this change (the packaged catalog
-lowers claude-sonnet-5-5 cache_read to $0.10 from 2026-10-07 -- a price
-correction with no code or schema change, so it bumps the patch version). A
-broken
+agree, and both must read "0.5.3" for this change (the packaged catalog adds
+claude-fable-5-2, claude-mythos-5-2, gpt-6.1-terra, gpt-6.1-sol and
+codex-auto-review -- catalog entries only, with no code or schema change, so
+it bumps the patch version). A broken
 implementation would bump one file but not the other, or forget the bump
 entirely.
 
@@ -31,5 +31,5 @@ def test_pyproject_version_matches_package_version():
 
 
 def test_version_is_0_5_2():
-    assert agent_cost.__version__ == "0.5.2"
-    assert _pyproject_version() == "0.5.2"
+    assert agent_cost.__version__ == "0.5.3"
+    assert _pyproject_version() == "0.5.3"
