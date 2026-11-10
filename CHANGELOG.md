@@ -11,8 +11,9 @@
   `claude-fable-5-1` is unchanged; `claude-mythos-5-1` stays unpriced until
   its release date is confirmed.
 - `gpt-6.1-terra`, `gpt-6.1-sol` and `codex-auto-review` rate entries
-  (catalog_version `2026-11-09`); `codex-auto-review` is priced as
-  `gpt-6.1-terra` by a human decision (no published price).
+  (released in catalog_version `2026-11-10`; the intermediate `2026-11-09`
+  was never published); `codex-auto-review` is priced as `gpt-6.1-terra` by
+  a human decision (no published price).
 
 ## 0.5.2
 
