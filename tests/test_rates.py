@@ -527,7 +527,7 @@ def test_packaged_catalog_existing_models_are_unchanged():
     rows are never changed in place; a price change adds a new period.
     """
     raw = json.loads(resources.files("agent_cost").joinpath("rates.json").read_bytes())
-    added_after = {"claude-haiku-5-5", "gpt-6.1-terra", "gpt-6.1-sol", "codex-auto-review"}
+    added_after = {"claude-haiku-5-5", "gpt-6.1-terra", "gpt-6.1-sol", "codex-auto-review", "claude-fable-5-2", "claude-mythos-5-2"}
     existing = [m for m in raw["models"] if m["model_key"] not in added_after]
     digest = hashlib.sha256(json.dumps(existing, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     assert digest == _EXISTING_MODELS_SHA256

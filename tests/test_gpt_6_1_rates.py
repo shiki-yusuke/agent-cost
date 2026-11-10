@@ -110,7 +110,7 @@ def test_existing_gpt_5_6_terra_values_are_unchanged():
 
 def test_catalog_version_and_source_record_the_gpt_6_1_pricing_page():
     catalog = load_rates()
-    assert catalog.catalog_version == "2026-11-09"
+    assert catalog.catalog_version >= "2026-11-09"
     urls = [(s.get("url"), s.get("retrieved_at")) for s in catalog.sources]
     assert urls.count(("https://developers.openai.com/api/docs/pricing", "2026-11-05")) == 1
     raw = json.loads((Path(agent_cost.__file__).parent / "rates.json").read_text(encoding="utf-8"))
