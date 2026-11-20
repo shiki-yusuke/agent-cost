@@ -11,6 +11,16 @@
   over 272K tokens on the API (long-context pricing) are not represented and
   may be underpriced. Separate entries, not aliases; existing entries are
   unchanged.
+  `gpt-6.2-astra` takes the same conservative Codex path as `gpt-6-astra`:
+  turn-level model attribution, `service_tier=priority` as fast, and pricing
+  only for Codex rows whose raw model ID is exactly `gpt-6.2-astra` with a
+  known mode (other rows stay unpriced). `fast_multiplier` applies only when
+  the reader marks a fact as mode fast; in the current Codex reader only the
+  Astra conservative path (`gpt-6-astra` / `gpt-6.2-astra`) maps
+  `service_tier=priority` to fast. The ordinary path does not read
+  `service_tier` (an existing limitation, to be addressed separately), so
+  Fast usage of `gpt-6.1-*` / `gpt-6.2-sol` / `gpt-6-luna` on the ordinary
+  path may be reported at standard rates.
 - `gpt-reserve` (hidden in codex-cli 0.171.0) is intentionally left without
   an entry and stays unpriced: it has no published price.
 - `gpt-6-luna` rate entry, effective 2026-09-22 (official API changelog
