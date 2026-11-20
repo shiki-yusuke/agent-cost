@@ -69,7 +69,10 @@ def test_gpt_6_1_models_credits_follow_usd_per_credit_and_entry_shape():
     for model, (_rate_id, usd, credits) in EXPECTED.items():
         entry = catalog.models[model]
         assert entry.aliases == ()
-        assert entry.fast_multiplier == Decimal("1.0")
+        # Corrected 2026-11-20: model pages say "Fast mode prices are 2x Standard".
+        # codex-auto-review keeps 1.0 (not changed by the 2026-11-20 correction).
+        expected_fast = "1.0" if model == "codex-auto-review" else "2.0"
+        assert entry.fast_multiplier == Decimal(expected_fast), model
         assert entry.credits_per_mtok["cache_write_5m"] is None
         assert entry.credits_per_mtok["cache_write_1h"] is None
         for kind, value in credits.items():
@@ -115,3 +118,8 @@ def test_catalog_version_and_source_record_the_gpt_6_1_pricing_page():
     assert urls.count(("https://developers.openai.com/api/docs/pricing", "2026-11-05")) == 1
     raw = json.loads((Path(agent_cost.__file__).parent / "rates.json").read_text(encoding="utf-8"))
     assert any("codex-auto-review" in n and "2026-11-06" in n for n in raw["notes"])
+
+
+def test_codex_auto_review_fast_multiplier_is_unchanged():
+    catalog = load_rates()
+    assert catalog.models["codex-auto-review"].fast_multiplier == Decimal("1.0")

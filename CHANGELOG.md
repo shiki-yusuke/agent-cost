@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `gpt-6.2-sol` and `gpt-6.2-astra` rate entries (catalog_version
+  `2026-11-20`), effective 2026-11-17 (official Model Release Notes date):
+  standard tier, short context $2 / $0.10 cache read / $10 output and
+  $8 / $0.40 / $40 per MTok, fast mode 2x (Fast = former Priority). Inputs
+  over 272K tokens on the API (long-context pricing) are not represented and
+  may be underpriced. Separate entries, not aliases; existing entries are
+  unchanged.
+  `gpt-6.2-astra` takes the same conservative Codex path as `gpt-6-astra`:
+  turn-level model attribution, `service_tier=priority` as fast, and pricing
+  only for Codex rows whose raw model ID is exactly `gpt-6.2-astra` with a
+  known mode (other rows stay unpriced). `fast_multiplier` applies only when
+  the reader marks a fact as mode fast; in the current Codex reader only the
+  Astra conservative path (`gpt-6-astra` / `gpt-6.2-astra`) maps
+  `service_tier=priority` to fast. The ordinary path does not read
+  `service_tier` (an existing limitation, to be addressed separately), so
+  Fast usage of `gpt-6.1-*` / `gpt-6.2-sol` / `gpt-6-luna` on the ordinary
+  path may be reported at standard rates.
+- `gpt-reserve` (hidden in codex-cli 0.171.0) is intentionally left without
+  an entry and stays unpriced: it has no published price.
+- `gpt-6-luna` rate entry, effective 2026-09-22 (official API changelog
+  release date): $0.10 / $0.01 cache read / $0.50 output per MTok, 2.5 /
+  0.25 / 12.5 credits, fast mode 2x. A separate entry, not an alias of
+  `gpt-5.6-luna` (unchanged). Inputs over 272K tokens on the API are not
+  represented; Codex signed in with ChatGPT has no long-context multiplier.
+  `gpt-6-sol` stays unpriced: its price is unconfirmed.
+
+### Fixed
+
+- `gpt-6.1-sol` and `gpt-6.1-terra` fast mode is now 2x standard
+  (`fast_multiplier` 1.0 -> 2.0, per both model pages and the Enterprise
+  rate card). catalog `2026-11-10` underpriced fast-mode GPT-6.1 rows by
+  half; regenerate reports that cover them. `codex-auto-review` is
+  unchanged. The placeholder `effective_from` 2026-10-01 is kept, so
+  `gpt-6.1-sol` rows from its 2026-09-29 release to 2026-10-01 stay
+  unpriced.
+
 ## 0.5.3
 
 ### Added

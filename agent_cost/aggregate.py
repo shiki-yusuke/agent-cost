@@ -19,6 +19,10 @@ from .rates import RateCatalog
 GROUP_DIMENSIONS = ("month", "agent", "model", "token-kind")
 _STATUS_RANK = {"unpriced": 0, "lower_bound": 1, "priced": 2}
 
+# Codex model keys priced only through the conservative Astra reader path
+# (agent_cost.readers.codex._ASTRA_MODEL_IDS): exact raw ID and a known mode.
+_STRICT_CODEX_MODEL_KEYS = frozenset({"gpt-6-astra", "gpt-6.2-astra"})
+
 
 def price_fact(catalog: RateCatalog, fact: Fact) -> Tuple[Optional[Decimal], str, Optional[Decimal]]:
     """Price one fact. Returns ``(estimated_cost_usd, pricing_status, credits)``.
@@ -38,11 +42,12 @@ def price_fact(catalog: RateCatalog, fact: Fact) -> Tuple[Optional[Decimal], str
     if resolved_key is None or period is None:
         return None, "unpriced", None
 
-    # Astra's verified rates cover only the exact Codex model ID. Generic
-    # suffix normalization must not implicitly price unverified snapshots,
-    # speed variants or usage from a different agent with this new entry.
-    if resolved_key == "gpt-6-astra" and (
-        fact.agent != "codex" or fact.model_raw != "gpt-6-astra" or fact.mode == "unknown"
+    # The verified rates of gpt-6-astra and gpt-6.2-astra each cover only
+    # their exact Codex model ID. Generic suffix normalization must not
+    # implicitly price unverified snapshots, speed variants, usage from a
+    # different agent, or a turn whose mode is unknown with these entries.
+    if resolved_key in _STRICT_CODEX_MODEL_KEYS and (
+        fact.agent != "codex" or fact.model_raw != resolved_key or fact.mode == "unknown"
     ):
         return None, "unpriced", None
 

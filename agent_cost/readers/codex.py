@@ -44,6 +44,12 @@ def _detect_mode(model: Optional[str], collaboration_mode: Optional[str]) -> str
     return "unknown"
 
 
+# Exact raw model IDs that take the conservative Astra path. Detection below
+# matches these as prefixes, so snapshot/alias variants also take the strict
+# path; pricing still requires the exact raw ID (see aggregate.price_fact).
+_ASTRA_MODEL_IDS = ("gpt-6-astra", "gpt-6.2-astra")
+
+
 def _contains_astra(rollout_path: Path, model: Optional[str]) -> bool:
     """Select the conservative path without trusting the DB's final model.
 
@@ -51,7 +57,7 @@ def _contains_astra(rollout_path: Path, model: Optional[str]) -> bool:
     rollouts retain their existing reader behavior. No token data is collected here.
     """
     def astra(value):
-        return isinstance(value, str) and value.startswith("gpt-6-astra")
+        return isinstance(value, str) and value.startswith(_ASTRA_MODEL_IDS)
 
     if astra(model):
         return True
@@ -158,7 +164,7 @@ class _AstraTurnPricing:
         # Use the existing unknown-model representation for uncertain non-Astra
         # usage too; those catalogs historically price mode=unknown as standard.
         if mode == "unknown":
-            return (model if model == "gpt-6-astra" else None), mode
+            return (model if model in _ASTRA_MODEL_IDS else None), mode
         return model, mode
 
 
