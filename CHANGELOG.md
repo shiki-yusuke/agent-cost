@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `gpt-6.2-sol` and `gpt-6.2-astra` rate entries (catalog_version
+  `2026-11-20`), effective 2026-11-17 (official Model Release Notes date):
+  standard tier, short context $2 / $0.10 cache read / $10 output and
+  $8 / $0.40 / $40 per MTok, fast mode 2x (Fast = former Priority). Inputs
+  over 272K tokens on the API (long-context pricing) are not represented and
+  may be underpriced. Separate entries, not aliases; existing entries are
+  unchanged.
+- `gpt-reserve` (hidden in codex-cli 0.171.0) is intentionally left without
+  an entry and stays unpriced: it has no published price.
+
 ## 0.5.3
 
 ### Added
