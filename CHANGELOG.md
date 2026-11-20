@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.5.4
+
+Catalog entries, a fast_multiplier correction for gpt-6.1-sol / gpt-6.1-terra,
+and the conservative Astra reader path extended to gpt-6.2-astra. No schema
+change.
 
 ### Added
 
