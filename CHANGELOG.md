@@ -13,6 +13,22 @@
   unchanged.
 - `gpt-reserve` (hidden in codex-cli 0.171.0) is intentionally left without
   an entry and stays unpriced: it has no published price.
+- `gpt-6-luna` rate entry, effective 2026-09-22 (official API changelog
+  release date): $0.10 / $0.01 cache read / $0.50 output per MTok, 2.5 /
+  0.25 / 12.5 credits, fast mode 2x. A separate entry, not an alias of
+  `gpt-5.6-luna` (unchanged). Inputs over 272K tokens on the API are not
+  represented; Codex signed in with ChatGPT has no long-context multiplier.
+  `gpt-6-sol` stays unpriced: its price is unconfirmed.
+
+### Fixed
+
+- `gpt-6.1-sol` and `gpt-6.1-terra` fast mode is now 2x standard
+  (`fast_multiplier` 1.0 -> 2.0, per both model pages and the Enterprise
+  rate card). catalog `2026-11-10` underpriced fast-mode GPT-6.1 rows by
+  half; regenerate reports that cover them. `codex-auto-review` is
+  unchanged. The placeholder `effective_from` 2026-10-01 is kept, so
+  `gpt-6.1-sol` rows from its 2026-09-29 release to 2026-10-01 stay
+  unpriced.
 
 ## 0.5.3
 

@@ -84,7 +84,7 @@ def test_existing_gpt_6_1_values_are_unchanged():
     ):
         entry = catalog.models[model]
         assert len(entry.rates) == 1
-        assert entry.fast_multiplier == Decimal("1.0")
+        assert entry.fast_multiplier == Decimal("2.0")  # corrected 2026-11-20
         _, period = catalog.rate_for(model, dt("2026-11-20T03:00:00+00:00"))
         assert period.rate_id == rate_id
         assert period.values["input_nocache"] == Decimal(usd[0])
