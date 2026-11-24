@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.5.6
+
+Reader fix: the normal Codex path now prices Fast (`service_tier: "priority"`)
+turns at the fast multiplier. No catalog or schema change.
 
 ### Fixed
 
