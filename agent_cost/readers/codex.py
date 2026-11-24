@@ -44,6 +44,90 @@ def _detect_mode(model: Optional[str], collaboration_mode: Optional[str]) -> str
     return "unknown"
 
 
+_SERVICE_TIER_MODES = {"priority": "fast", "default": "normal"}
+
+
+def _service_tier_mode(tier) -> Optional[str]:
+    """Map an explicit ``thread_settings.service_tier`` to a mode.
+
+    ``None`` (absent or null) means "not stated" and leaves the caller to
+    fall back to :func:`_detect_mode`. Any other value that is not exactly
+    ``"priority"`` or ``"default"`` (unknown name, case variant, non-string)
+    is ``"unknown"`` so it is never silently costed at standard rates.
+    """
+    if tier is None:
+        return None
+    if isinstance(tier, str) and tier in _SERVICE_TIER_MODES:
+        return _SERVICE_TIER_MODES[tier]
+    return "unknown"
+
+
+class _OwnedServiceTier:
+    """Turn-scoped ``service_tier`` for the ordinary (non-Astra) path.
+
+    Only ``thread_settings_applied`` snapshots owned by this rollout's thread
+    (``thread_id == session_id``, the Astra path's ownership key) count; with
+    no owner, explicit tiers are ignored. A snapshot takes effect only at the
+    next ``task_started``/``turn_started``: the producer keeps an in-flight
+    turn's captured settings (docs/astra-pricing.md, producer notes). Outside
+    a turn (no markers, before the first start, between turns) the caller's
+    existing detection applies. If a turn started without an explicit tier and
+    one first appears mid-turn, the rest of the turn keeps the detected mode
+    when the tier agrees with it and is ``"unknown"`` otherwise. A completion
+    closes the turn unless both it and the turn carry differing turn IDs.
+    """
+
+    def __init__(self, session_id):
+        self.session_id = session_id
+        self.pending: Optional[str] = None  # latest owned snapshot's mode
+        self.current: Optional[str] = None  # mode captured at turn start
+        self.in_turn = False
+        self.turn_id: Optional[str] = None
+        self.mid_turn: set = set()  # explicit modes seen mid-turn (current is None)
+
+    @staticmethod
+    def _id(payload) -> Optional[str]:
+        turn_id = payload.get("turn_id")
+        return turn_id if isinstance(turn_id, str) and turn_id else None
+
+    def observe(self, payload):
+        kind = payload.get("type")
+        if kind == "thread_settings_applied":
+            settings = payload.get("thread_settings")
+            if not self.session_id or payload.get("thread_id") != self.session_id:
+                return
+            if not isinstance(settings, dict):
+                return
+            # Each snapshot replaces the previous one: absent/null resets to
+            # "not stated" instead of inheriting an earlier tier.
+            self.pending = _service_tier_mode(settings.get("service_tier"))
+            if self.in_turn and self.current is None and self.pending is not None:
+                self.mid_turn.add(self.pending)
+        elif kind in ("task_started", "turn_started"):
+            self.in_turn = True
+            self.turn_id = self._id(payload)
+            self.current = self.pending
+            self.mid_turn = set()
+        elif kind in ("task_complete", "turn_complete", "turn_aborted"):
+            done = self._id(payload)
+            if done and self.turn_id and done != self.turn_id:
+                return  # another turn's completion; the active turn continues
+            self.in_turn = False
+            self.turn_id = None
+            self.current = None
+            self.mid_turn = set()
+
+    def mode(self, detected: str) -> Optional[str]:
+        """Tier-derived mode for the next delta, or ``None`` to use ``detected``."""
+        if not self.in_turn:
+            return None
+        if self.current is not None:
+            return self.current
+        if self.mid_turn - {detected}:
+            return "unknown"
+        return None
+
+
 # Exact raw model IDs that take the conservative Astra path. Detection below
 # matches these as prefixes, so snapshot/alias variants also take the strict
 # path; pricing still requires the exact raw ID (see aggregate.price_fact).
@@ -295,6 +379,7 @@ def parse_rollout_facts(
     strict = _AstraTurnPricing(session_id) if _contains_astra(rollout_path, model_raw) else None
     model_key = normalize_model_key(model_raw)
     collaboration_mode: Optional[str] = None
+    tier = _OwnedServiceTier(session_id)
     last_input_total = 0
     last_cached_total = 0
     last_output_total = 0
@@ -322,6 +407,7 @@ def parse_rollout_facts(
                 continue
             payload = event.get("payload") or {}
             ptype = payload.get("type")
+            tier.observe(payload)
             if ptype == "task_started":
                 cm = payload.get("collaboration_mode_kind")
                 if cm is not None and collaboration_mode is None:
@@ -353,11 +439,18 @@ def parse_rollout_facts(
                 diff_cached = cached_total - last_cached_total
                 diff_output = output_total - last_output_total
 
-            fact_model = model_raw
-            mode = _detect_mode(model_raw, collaboration_mode)
+            fact_model, fact_key = model_raw, model_key
+            detected = _detect_mode(model_raw, collaboration_mode)
+            tier_mode = tier.mode(detected)
+            mode = tier_mode or detected
+            if tier_mode == "unknown":
+                # Ordinary catalogs price mode=unknown as standard; use the
+                # unknown-model representation (as the Astra path does) so an
+                # unrecognized tier stays unpriced.
+                fact_model, fact_key = None, normalize_model_key(None)
             if strict is not None:
                 fact_model, mode = strict.attribution()
-                model_key = normalize_model_key(fact_model)
+                fact_key = normalize_model_key(fact_model)
             quality = "first_event_delta" if is_first_delta else "ok"
 
             if diff_input < 0 or diff_cached < 0:
@@ -371,7 +464,7 @@ def parse_rollout_facts(
                             agent="codex",
                             session_id=session_id,
                             model_raw=fact_model,
-                            model_key=model_key,
+                            model_key=fact_key,
                             token_kind="input_nocache",
                             tokens=nocache,
                             mode=mode,
@@ -385,7 +478,7 @@ def parse_rollout_facts(
                             agent="codex",
                             session_id=session_id,
                             model_raw=fact_model,
-                            model_key=model_key,
+                            model_key=fact_key,
                             token_kind="cache_read",
                             tokens=diff_cached,
                             mode=mode,
@@ -402,7 +495,7 @@ def parse_rollout_facts(
                         agent="codex",
                         session_id=session_id,
                         model_raw=fact_model,
-                        model_key=model_key,
+                        model_key=fact_key,
                         token_kind="output",
                         tokens=diff_output,
                         mode=mode,
