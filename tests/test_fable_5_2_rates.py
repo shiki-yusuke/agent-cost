@@ -77,7 +77,7 @@ def test_fable_5_1_is_unchanged_and_mythos_5_1_stays_unpriced():
 
 def test_catalog_version_and_sources_record_fable_5_2():
     catalog = load_rates()
-    assert catalog.catalog_version == "2026-11-20"
+    assert catalog.catalog_version == "2026-11-24"
     urls = [(s.get("url"), s.get("retrieved_at")) for s in catalog.sources]
     assert ("https://www.anthropic.com/claude-fable-and-mythos-5-2", "2026-11-10") in urls
     assert ("https://platform.claude.com/docs/en/about-claude/pricing", "2026-11-10") in urls

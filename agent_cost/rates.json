@@ -1,6 +1,6 @@
 {
   "schema_version": "2",
-  "catalog_version": "2026-11-20",
+  "catalog_version": "2026-11-24",
   "currency": "USD",
   "unit": "per_mtok",
   "usd_per_credit": "0.04",
@@ -18,7 +18,8 @@
     "gpt-6.1-terra, gpt-6.1-sol and codex-auto-review added 2026-11-09: standard tier, short context USD per MTok from the human-approved price table pricing-2026-11-v4 (developers.openai.com/api/docs/pricing, retrieved 2026-11-05); effective_from 2026-10-01T00:00:00Z is a placeholder before the first observed use (official launch date unconfirmed; rate_id *-launch-date-unconfirmed, following the claude-opus-5 placeholder precedent); usage from 2026-11-04 must be priced, so the retrieval date 2026-11-05 cannot be used. codex-auto-review is the model name of the Codex automatic review (guardian subagent) and has no published price; a human decision on 2026-11-06 prices it the same as gpt-6.1-terra. credits_per_mtok follow usd_per_credit=0.04. Existing entries (including gpt-5.6-terra) are unchanged.",
     "claude-fable-5-2 and claude-mythos-5-2 added 2026-11-10: rate_ids claude-fable-5-2-launch-2026-11-09 / claude-mythos-5-2-launch-2026-11-09. effective_from 2026-11-09T00:00:00Z is 00:00:00Z of the official announcement date (anthropic.com/claude-fable-and-mythos-5-2, published November 9, 2026); the launch time of day is not published, but a transcript row whose raw model ID is claude-fable-5-2 or claude-mythos-5-2 cannot predate the launch. Values 8.0/0.20/10.0/16.0/40.0 per the pricing page (retrieved 2026-11-10): cache_read is 0.025x base input (footnote 1), like claude-fable-5-1. claude-mythos-5-2 (limited availability, verified organizations only) has the same prices; it is kept as a separate entry, never an alias of claude-fable-5-2. fast_multiplier 2.0 (fast mode $16/$80 per MTok on the pricing page). No prompt-length tiers (1M context at standard prices). Claude Code's CHANGELOG entry for 2.1.321 adds claude-fable-5-2 at $8/$40 with $0.20 cache reads. claude-fable-5-1 is unchanged (10.0/0.25/12.50/20.0/50.0). claude-mythos-5-1 stays absent (official release date unconfirmed), so its rows remain unpriced.",
     "gpt-6.2-sol and gpt-6.2-astra added 2026-11-20: rate_ids gpt-6.2-sol-launch-2026-11-17 / gpt-6.2-astra-launch-2026-11-17. Standard tier, short context USD per MTok from the human-approved price table (developers.openai.com/api/docs/pricing, Codex rate card, retrieved 2026-11-20): gpt-6.2-sol 2.00/0.10/10.00 and gpt-6.2-astra 8.00/0.40/40.00 (input_nocache/cache_read/output); no cache write prices. effective_from 2026-11-17T00:00:00Z is 00:00:00Z of the official release date (help.openai.com Model Release Notes, 'November 17, 2026'); only the date is published, but a log row whose raw model ID is gpt-6.2-sol or gpt-6.2-astra cannot predate the release, so pricing from the start of that UTC day cannot price a pre-release event. Long-context pricing for inputs over 272K tokens (API: input and cache x2, output x1.5) is not represented in this catalog: the official Codex rate card has no 272K-threshold surcharge for Enterprise Codex signed in with ChatGPT, so only API-key requests over 272K tokens may be underpriced; prompt_tiers are not used (human decision 2026-11-20), following the gpt-6.1 short-context-only precedent. fast_multiplier 2.0: Fast mode (formerly Priority) is 2x Standard per the official pricing, and the Codex reader maps service_tier=priority to mode fast. Batch, Ultrafast and Flex are not represented. Separate entries, never aliases. gpt-reserve (present but hidden in codex-cli 0.171.0) has no published price, so no entry is created and its rows stay unpriced. credits_per_mtok follow usd_per_credit=0.04. Existing entries are unchanged. fast_multiplier applies only when the reader marks a fact as mode fast: in the current Codex reader only the conservative Astra path (gpt-6-astra / gpt-6.2-astra) maps service_tier=priority to mode fast; the ordinary path does not read service_tier (an existing limitation, to be addressed separately), so Fast usage of gpt-6.1-* / gpt-6.2-sol / gpt-6-luna on the ordinary path may be reported at standard rates. gpt-6.2-astra takes the same conservative path as gpt-6-astra: it is priced only for Codex rows whose raw model ID is exactly gpt-6.2-astra and whose mode is known; other rows stay unpriced.",
-    "gpt-6-luna added and gpt-6.1-* fast_multiplier corrected 2026-11-20 (human-approved 2026-11-20): gpt-6-luna is a separate entry, never an alias of gpt-5.6-luna, with rate_id gpt-6-luna-launch-2026-09-22 and effective_from 2026-09-22T00:00:00Z, 00:00:00Z of the official release date (developers.openai.com/api/docs/changelog, Sep 22 'Released GPT-6 Sol (gpt-6-sol) and GPT-6 Luna (gpt-6-luna)'), priced 0.10/0.01/0.50 (input_nocache/cache_read/output, no cache write prices) per its model page (developers.openai.com/api/docs/models/gpt-6-luna, retrieved 2026-11-20: Input $0.10 / Cached input $0.01 / Output $0.50), credits_per_mtok 2.5/0.25/12.5 per the Enterprise rate card ('GPT-6 Luna | 2.5 credits | 0.25 credits | 12.5 credits'), fast_multiplier 2.0 ('Fast mode is priced at 2x the applicable rates'), and no prompt_tiers; inputs over 272K tokens (long-context pricing) are not represented, and Codex signed in with ChatGPT has no long-context surcharge (Enterprise rate card: 'no long-context multiplier applies to any Codex model'); gpt-6.1-sol and gpt-6.1-terra fast_multiplier is corrected from 1.0 to 2.0 (both model pages: 'Fast mode prices are 2x Standard'; the Enterprise USD rate card lists GPT-6.1 Terra, GPT-6.1 Sol and GPT-6 Luna under Fast mode), so catalog 2026-11-10 underpriced fast-mode gpt-6.1 rows by half and reports covering them should be regenerated, while codex-auto-review (priced like gpt-6.1-terra by human decision) is not changed; the official release dates are 2026-09-29 for gpt-6.1-sol and 2026-10-26 for gpt-6.1-terra, but the placeholder effective_from 2026-10-01 is not changed here, so gpt-6.1-sol rows from 2026-09-29 to 2026-10-01 stay unpriced (fail-closed); gpt-6-sol gets no entry because its prices are unconfirmed."
+    "gpt-6-luna added and gpt-6.1-* fast_multiplier corrected 2026-11-20 (human-approved 2026-11-20): gpt-6-luna is a separate entry, never an alias of gpt-5.6-luna, with rate_id gpt-6-luna-launch-2026-09-22 and effective_from 2026-09-22T00:00:00Z, 00:00:00Z of the official release date (developers.openai.com/api/docs/changelog, Sep 22 'Released GPT-6 Sol (gpt-6-sol) and GPT-6 Luna (gpt-6-luna)'), priced 0.10/0.01/0.50 (input_nocache/cache_read/output, no cache write prices) per its model page (developers.openai.com/api/docs/models/gpt-6-luna, retrieved 2026-11-20: Input $0.10 / Cached input $0.01 / Output $0.50), credits_per_mtok 2.5/0.25/12.5 per the Enterprise rate card ('GPT-6 Luna | 2.5 credits | 0.25 credits | 12.5 credits'), fast_multiplier 2.0 ('Fast mode is priced at 2x the applicable rates'), and no prompt_tiers; inputs over 272K tokens (long-context pricing) are not represented, and Codex signed in with ChatGPT has no long-context surcharge (Enterprise rate card: 'no long-context multiplier applies to any Codex model'); gpt-6.1-sol and gpt-6.1-terra fast_multiplier is corrected from 1.0 to 2.0 (both model pages: 'Fast mode prices are 2x Standard'; the Enterprise USD rate card lists GPT-6.1 Terra, GPT-6.1 Sol and GPT-6 Luna under Fast mode), so catalog 2026-11-10 underpriced fast-mode gpt-6.1 rows by half and reports covering them should be regenerated, while codex-auto-review (priced like gpt-6.1-terra by human decision) is not changed; the official release dates are 2026-09-29 for gpt-6.1-sol and 2026-10-26 for gpt-6.1-terra, but the placeholder effective_from 2026-10-01 is not changed here, so gpt-6.1-sol rows from 2026-09-29 to 2026-10-01 stay unpriced (fail-closed); gpt-6-sol gets no entry because its prices are unconfirmed.",
+    "gpt-6-sol added and gpt-6.1-sol effective_from corrected 2026-11-24 (human-approved 2026-11-24): gpt-6-sol is a separate entry, never an alias, with rate_id gpt-6-sol-launch-2026-09-22 and effective_from 2026-09-22T00:00:00Z, 00:00:00Z of the official release date (developers.openai.com/api/docs/changelog, Sep 22 'Released GPT-6 Sol (gpt-6-sol) and GPT-6 Luna (gpt-6-luna)'), priced 2.00/0.20/10.00 (input_nocache/cache_read/output, no cache write prices) per the changelog ('GPT-6 Sol: $2 input, $0.20 cached input, and $10 output.'), with fast_multiplier 2.0 per its model page (developers.openai.com/api/docs/models/gpt-6-sol, retrieved 2026-11-24: Fast mode is priced at 2x the applicable rates), and no prompt_tiers; gpt-6-sol is not listed in the Standard table of the pricing page, so the basis is the model page plus the changelog; inputs over 272K tokens (long-context pricing) are not represented; credits_per_mtok 50/5/250 per the GPT-6 Sol row of the Enterprise rate card (help.openai.com/en/articles/11481834: 'GPT-6 Sol | 50 credits | 5 credits | 250 credits'), consistent with usd_per_credit=0.04; gpt-6.1-sol's placeholder period (rate_id gpt-6.1-sol-launch-date-unconfirmed, effective_from 2026-10-01) is replaced rather than edited in place, following the claude-opus-5 2026-09-23 correction precedent, by rate_id gpt-6.1-sol-launch-2026-09-29 with effective_from 2026-09-29T00:00:00Z, 00:00:00Z of the official release date (changelog, Sep 29 'Released GPT-6.1 Sol (gpt-6.1-sol)'); prices and other fields are unchanged, so gpt-6.1-sol rows from 2026-09-29 to 2026-10-01 move from unpriced to priced; gpt-6.1-terra and codex-auto-review are not changed."
   ],
   "sources": [
     {
@@ -159,6 +160,21 @@
     {
       "url": "https://help.openai.com/en/articles/20001415-chatgpt-rate-card-enterprise-token-based-pricing",
       "retrieved_at": "2026-11-20"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/models/gpt-6-sol",
+      "retrieved_at": "2026-11-24",
+      "note": "GPT-6 Sol model page: Fast mode at 2x the applicable rates; long context over 272K input tokens is 2x input/cache and 1.5x output (not represented)"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/changelog",
+      "retrieved_at": "2026-11-24",
+      "note": "'GPT-6 Sol: $2 input, $0.20 cached input, and $10 output.'; Sep 22 'Released GPT-6 Sol (gpt-6-sol) and GPT-6 Luna (gpt-6-luna)'; Sep 29 'Released GPT-6.1 Sol (gpt-6.1-sol)'"
+    },
+    {
+      "url": "https://help.openai.com/en/articles/11481834",
+      "retrieved_at": "2026-11-24",
+      "note": "Enterprise rate card: 'GPT-6 Sol | 50 credits | 5 credits | 250 credits'"
     }
   ],
   "models": [
@@ -796,8 +812,8 @@
       },
       "rates": [
         {
-          "rate_id": "gpt-6.1-sol-launch-date-unconfirmed",
-          "effective_from": "2026-10-01T00:00:00+00:00",
+          "rate_id": "gpt-6.1-sol-launch-2026-09-29",
+          "effective_from": "2026-09-29T00:00:00+00:00",
           "effective_until": null,
           "input_nocache": "2.00",
           "cache_read": "0.10",
@@ -900,6 +916,30 @@
           "cache_write_5m": null,
           "cache_write_1h": null,
           "output": "0.50"
+        }
+      ]
+    },
+    {
+      "model_key": "gpt-6-sol",
+      "aliases": [],
+      "fast_multiplier": "2.0",
+      "credits_per_mtok": {
+        "input_nocache": "50.0",
+        "cache_read": "5.0",
+        "cache_write_5m": null,
+        "cache_write_1h": null,
+        "output": "250.0"
+      },
+      "rates": [
+        {
+          "rate_id": "gpt-6-sol-launch-2026-09-22",
+          "effective_from": "2026-09-22T00:00:00+00:00",
+          "effective_until": null,
+          "input_nocache": "2.00",
+          "cache_read": "0.20",
+          "cache_write_5m": null,
+          "cache_write_1h": null,
+          "output": "10.00"
         }
       ]
     }
