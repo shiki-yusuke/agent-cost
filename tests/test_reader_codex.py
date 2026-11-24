@@ -2,6 +2,10 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 
+import pytest
+
+from agent_cost.aggregate import price_fact
+from agent_cost.rates import load_rates
 from agent_cost.readers.codex import (
     fetch_threads,
     parse_rollout_facts,
@@ -484,3 +488,260 @@ def test_codex_facts_have_no_prompt_tokens(tmp_path):
     facts, _, _ = parse_rollout_facts(rollout, model_raw="gpt-5.5", session_id="t1")
     assert facts
     assert all(f.prompt_tokens is None for f in facts)
+
+
+# ── service_tier on the ordinary (non-Astra) path ──
+
+_TIER_AT = "2026-11-20T03:00:00Z"
+_UNSET = object()
+
+
+def _tier_event(kind, **payload):
+    return {"type": "event_msg", "timestamp": _TIER_AT, "payload": {"type": kind, **payload}}
+
+
+def _tier_settings(model, tier=_UNSET):
+    settings = {"model": model, "model_provider_id": "openai"}
+    if tier is not _UNSET:
+        settings["service_tier"] = tier
+    return _tier_event("thread_settings_applied", thread_id="t1", thread_settings=settings)
+
+
+def _tier_usage(n):
+    return _tier_event(
+        "token_count",
+        info={"total_token_usage": {"input_tokens": n * 1_000_000, "cached_input_tokens": 0, "output_tokens": 0}},
+    )
+
+
+def _tier_facts(tmp_path, events, model="gpt-6.2-sol"):
+    rollout = tmp_path / "tier.jsonl"
+    rollout.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    facts, _, _ = parse_rollout_facts(rollout, model_raw=model, session_id="t1")
+    return facts
+
+
+def _priced(fact):
+    return price_fact(load_rates(), fact)
+
+
+def test_service_tier_priority_is_fast_over_default_collaboration(tmp_path):
+    events = [
+        _tier_settings("gpt-6.2-sol", "priority"),
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(1),
+    ]
+    (fact,) = _tier_facts(tmp_path, events)
+    assert fact.mode == "fast"
+    assert fact.model_raw == "gpt-6.2-sol"
+    cost, status, credits = _priced(fact)
+    assert (cost, status, credits) == (4, "priced", 100)
+
+
+def test_service_tier_default_after_priority_is_standard(tmp_path):
+    events = [
+        _tier_settings("gpt-6.2-sol", "priority"),
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(1),
+        _tier_settings("gpt-6.2-sol", "default"),
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(2),
+    ]
+    facts = _tier_facts(tmp_path, events)
+    assert [f.mode for f in facts] == ["fast", "normal"]
+    assert [_priced(f)[0] for f in facts] == [4, 2]
+
+
+def test_service_tier_default_overrides_fast_model_suffix(tmp_path):
+    events = [_tier_settings("gpt-5.5-fast", "default"), _tier_event("task_started"), _tier_usage(1)]
+    (fact,) = _tier_facts(tmp_path, events, model="gpt-5.5-fast")
+    assert fact.mode == "normal"
+
+
+@pytest.mark.parametrize("tier", ["flex", "PRIORITY", "Default", 1, 2.0, True, ["priority"], {"tier": "priority"}])
+def test_unrecognized_service_tier_is_unknown_and_unpriced(tmp_path, tier):
+    events = [
+        _tier_settings("gpt-6.2-sol", tier),
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(1),
+    ]
+    (fact,) = _tier_facts(tmp_path, events)
+    assert fact.mode == "unknown"
+    assert fact.tokens == 1_000_000
+    assert _priced(fact) == (None, "unpriced", None)
+
+
+def test_service_tier_absent_keeps_fast_model_suffix(tmp_path):
+    events = [_tier_settings("gpt-5.5-fast"), _tier_usage(1)]
+    (fact,) = _tier_facts(tmp_path, events, model="gpt-5.5-fast")
+    assert fact.mode == "fast"
+
+
+@pytest.mark.parametrize("tier", [_UNSET, None])
+def test_service_tier_absent_or_null_keeps_collaboration_detection(tmp_path, tier):
+    events = [
+        _tier_settings("gpt-6.2-sol", tier),
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(1),
+    ]
+    (fact,) = _tier_facts(tmp_path, events)
+    assert fact.mode == "normal"
+    assert _priced(fact)[:2] == (2, "priced")
+
+
+def test_service_tier_never_present_keeps_collaboration_fast(tmp_path):
+    events = [_tier_event("task_started", collaboration_mode_kind="fast-turbo"), _tier_usage(1)]
+    (fact,) = _tier_facts(tmp_path, events, model="gpt-5.5")
+    assert fact.mode == "fast"
+
+
+@pytest.mark.parametrize("tier", [_UNSET, None])
+def test_later_absent_or_null_service_tier_falls_back_to_detection(tmp_path, tier):
+    events = [
+        _tier_settings("gpt-6.2-sol", "priority"),
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(1),
+        _tier_event("task_complete"),
+        _tier_settings("gpt-6.2-sol", tier),
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(2),
+    ]
+    facts = _tier_facts(tmp_path, events)
+    assert [f.mode for f in facts] == ["fast", "normal"]
+
+
+def test_foreign_thread_service_tier_is_ignored(tmp_path):
+    foreign = _tier_settings("gpt-6.2-sol", "default")
+    foreign["payload"]["thread_id"] = "other-thread"
+    events = [
+        _tier_settings("gpt-6.2-sol", "priority"),
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(1),
+        _tier_event("task_complete"),
+        foreign,
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(2),
+    ]
+    facts = _tier_facts(tmp_path, events)
+    assert [f.mode for f in facts] == ["fast", "fast"]
+    assert [_priced(f)[0] for f in facts] == [4, 4]
+
+
+def test_foreign_thread_service_tier_alone_keeps_detection(tmp_path):
+    foreign = _tier_settings("gpt-6.2-sol", "priority")
+    foreign["payload"]["thread_id"] = "other-thread"
+    events = [foreign, _tier_event("task_started", collaboration_mode_kind="default"), _tier_usage(1)]
+    (fact,) = _tier_facts(tmp_path, events)
+    assert fact.mode == "normal"
+
+
+def test_service_tier_ignored_when_owner_unknown(tmp_path):
+    rollout = tmp_path / "tier.jsonl"
+    events = [
+        _tier_settings("gpt-6.2-sol", "priority"),
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(1),
+    ]
+    rollout.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    (fact,), _, _ = parse_rollout_facts(rollout, model_raw="gpt-6.2-sol", session_id=None)
+    assert fact.mode == "normal"
+
+
+def test_mid_turn_service_tier_applies_from_next_turn(tmp_path):
+    events = [
+        _tier_settings("gpt-6.2-sol", "default"),
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(1),
+        _tier_settings("gpt-6.2-sol", "priority"),
+        _tier_usage(2),
+        _tier_event("task_complete"),
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(3),
+    ]
+    facts = _tier_facts(tmp_path, events)
+    assert [f.mode for f in facts] == ["normal", "normal", "fast"]
+    assert [_priced(f)[0] for f in facts] == [2, 2, 4]
+
+
+def test_mid_turn_service_tier_without_prior_tier_is_unknown(tmp_path):
+    events = [
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_settings("gpt-6.2-sol", "priority"),
+        _tier_usage(1),
+        _tier_event("task_complete"),
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(2),
+    ]
+    facts = _tier_facts(tmp_path, events)
+    assert [f.mode for f in facts] == ["unknown", "fast"]
+    assert _priced(facts[0]) == (None, "unpriced", None)
+    assert _priced(facts[1])[:2] == (4, "priced")
+
+
+def test_service_tier_without_turn_markers_keeps_head_detection(tmp_path):
+    events = [_tier_settings("gpt-5.5-fast", "default"), _tier_usage(1)]
+    (fact,) = _tier_facts(tmp_path, events, model="gpt-5.5-fast")
+    assert fact.mode == "fast"
+    assert _priced(fact)[:2] == (12.5, "priced")
+
+
+def test_service_tier_before_first_turn_start_keeps_head_detection(tmp_path):
+    events = [
+        _tier_settings("gpt-5.5-fast", "default"),
+        _tier_usage(1),
+        _tier_event("task_started"),
+        _tier_usage(2),
+    ]
+    facts = _tier_facts(tmp_path, events, model="gpt-5.5-fast")
+    assert [f.mode for f in facts] == ["fast", "normal"]
+
+
+@pytest.mark.parametrize("tier, expected", [("default", "normal"), ("priority", "unknown")])
+def test_mid_turn_first_tier_is_unknown_only_when_mode_differs(tmp_path, tier, expected):
+    events = [
+        _tier_event("task_started", collaboration_mode_kind="default"),
+        _tier_usage(1),
+        _tier_settings("gpt-6.2-sol", tier),
+        _tier_usage(2),
+    ]
+    facts = _tier_facts(tmp_path, events)
+    assert [f.mode for f in facts] == ["normal", expected]
+
+
+def test_completion_for_other_turn_keeps_active_turn_tier(tmp_path):
+    events = [
+        _tier_settings("gpt-6.2-sol", "priority"),
+        _tier_event("task_started", turn_id="A", collaboration_mode_kind="default"),
+        _tier_usage(1),
+        _tier_settings("gpt-6.2-sol", "default"),
+        _tier_event("task_complete", turn_id="B"),
+        _tier_usage(2),
+        _tier_event("task_complete", turn_id="A"),
+        _tier_event("task_started", turn_id="C"),
+        _tier_usage(3),
+    ]
+    facts = _tier_facts(tmp_path, events)
+    assert [f.mode for f in facts] == ["fast", "fast", "normal"]
+    assert [_priced(f)[0] for f in facts] == [4, 4, 2]
+
+
+def test_completion_without_turn_id_closes_turn(tmp_path):
+    events = [
+        _tier_settings("gpt-6.2-sol", "priority"),
+        _tier_event("task_started", turn_id="A", collaboration_mode_kind="default"),
+        _tier_usage(1),
+        _tier_settings("gpt-6.2-sol", "default"),
+        _tier_event("task_complete"),
+        _tier_usage(2),  # between turns: legacy detection; would stay fast if the ID-less completion were ignored
+        _tier_event("task_started", turn_id="B"),
+        _tier_usage(3),
+    ]
+    facts = _tier_facts(tmp_path, events)
+    assert [f.mode for f in facts] == ["fast", "normal", "normal"]
+
+
+def test_unrecognized_tier_is_unpriced_when_detection_is_unknown(tmp_path):
+    events = [_tier_settings("gpt-6.2-sol", "flex"), _tier_event("task_started"), _tier_usage(1)]
+    (fact,) = _tier_facts(tmp_path, events)
+    assert fact.mode == "unknown"
+    assert _priced(fact) == (None, "unpriced", None)

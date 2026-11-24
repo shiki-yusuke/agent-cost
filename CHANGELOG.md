@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Codex reader: the ordinary (non-Astra) path now reads
+  `thread_settings.service_tier` from `thread_settings_applied` snapshots
+  owned by the rollout's thread (other threads' snapshots are ignored; with no
+  known owner the tier is not used). `priority` marks usage as mode `fast`
+  (fast_multiplier applies, e.g. 2x for gpt-6.2-sol) and `default` as `normal`,
+  taking precedence over the model-name suffix and `collaboration_mode_kind`.
+  Any other explicit value (unknown name, case variant, non-string) is mode
+  `unknown` and stays unpriced. A new tier takes effect only at the next turn
+  start; the rest of an in-flight turn keeps its previous tier. If the turn
+  started without one, the rest of the turn keeps the existing detection when
+  the new tier agrees with it and is `unknown` otherwise. Usage outside a turn
+  (no turn markers, before the first turn start, between turns) uses the
+  existing detection, and a completion carrying another turn's ID does not
+  end the active turn. Each snapshot replaces the previous tier;
+  absent/null falls back to the previous suffix/collaboration detection, so
+  rollouts without `service_tier` are unchanged. Reports covering Fast usage
+  of ordinary-path models were previously priced at 1x and should be
+  regenerated. The Astra path is unchanged. Known limitation: a custom catalog
+  that aliases `(unknown)` to a priced model prices unknown-tier usage; the
+  Astra path has the same limitation.
+
 ## 0.5.5
 
 Catalog only: gpt-6-sol added and the gpt-6.1-sol start date corrected. No
