@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.5.5
+
+Catalog only: gpt-6-sol added and the gpt-6.1-sol start date corrected. No
+code or schema change.
 
 ### Added
 

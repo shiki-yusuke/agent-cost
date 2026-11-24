@@ -1,8 +1,7 @@
 """Spec: pyproject.toml's [project].version and agent_cost.__version__ must
-agree, and both must read "0.5.4" for this change (the packaged catalog adds
-gpt-6.2-sol, gpt-6.2-astra and gpt-6-luna, corrects the gpt-6.1 fast
-multiplier, and routes gpt-6.2-astra through the conservative Astra reader
-path -- no schema change, so it bumps the patch version). A broken
+agree, and both must read "0.5.5" for this change (the packaged catalog adds
+gpt-6-sol and starts gpt-6.1-sol at its 2026-09-29 release date -- catalog
+entries only, with no code or schema change, so it bumps the patch version). A broken
 implementation would bump one file but not the other, or forget the bump
 entirely.
 
@@ -31,5 +30,5 @@ def test_pyproject_version_matches_package_version():
 
 
 def test_version_is_0_5_2():
-    assert agent_cost.__version__ == "0.5.4"
-    assert _pyproject_version() == "0.5.4"
+    assert agent_cost.__version__ == "0.5.5"
+    assert _pyproject_version() == "0.5.5"
