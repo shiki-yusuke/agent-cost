@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `gpt-6-sol` rate entry (catalog_version `2026-11-24`), effective 2026-09-22
+  (official API changelog release date): $2 / $0.20 cache read / $10 output
+  per MTok, fast mode 2x, credits 50 / 5 / 250 per MTok (Enterprise rate
+  card). Inputs over 272K tokens on the API (long-context pricing) are not
+  represented. Previously its rows were unpriced.
+
+### Fixed
+
+- `gpt-6.1-sol` now starts at its official release date 2026-09-29 instead of
+  the 2026-10-01 placeholder (rate period replaced, prices unchanged), so rows
+  from 2026-09-29 to 2026-10-01 are priced.
+
 ## 0.5.4
 
 Catalog entries, a fast_multiplier correction for gpt-6.1-sol / gpt-6.1-terra,

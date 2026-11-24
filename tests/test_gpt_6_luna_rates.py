@@ -100,15 +100,18 @@ def test_gpt_6_luna_fast_mode_is_2x_and_no_prompt_tiers():
         assert fast[2] == normal[2] * 2
 
 
-def test_gpt_6_sol_has_no_entry():
+def test_gpt_6_sol_is_priced_since_catalog_2026_11_24():
+    # gpt-6-sol had no entry in catalog 2026-11-20; its prices were confirmed and
+    # human-approved 2026-11-24 (details in tests/test_gpt_6_sol_rates.py).
     catalog = load_rates()
-    assert "gpt-6-sol" not in catalog.models
-    assert price_fact(catalog, _fact("gpt-6-sol", "output", "normal")) == (None, "unpriced", None)
+    assert "gpt-6-sol" in catalog.models
+    assert MODEL not in catalog.models["gpt-6-sol"].aliases
+    assert price_fact(catalog, _fact("gpt-6-sol", "output", "normal")) == (Decimal("10.00"), "priced", Decimal("250.0"))
 
 
 def test_sources_and_note_record_gpt_6_luna_and_fast_fix():
     catalog = load_rates()
-    assert catalog.catalog_version == "2026-11-20"
+    assert catalog.catalog_version == "2026-11-24"
     urls = [(s.get("url"), s.get("retrieved_at")) for s in catalog.sources]
     for url in (
         "https://developers.openai.com/api/docs/changelog",

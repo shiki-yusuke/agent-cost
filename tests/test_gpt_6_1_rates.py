@@ -23,7 +23,9 @@ EXPECTED = {
         {"input_nocache": "25.0", "cache_read": "1.25", "output": "125.0"},
     ),
     "gpt-6.1-sol": (
-        "gpt-6.1-sol-launch-date-unconfirmed",
+        # Placeholder period replaced 2026-11-24 by the official release date
+        # 2026-09-29 (boundary tests in tests/test_gpt_6_sol_rates.py).
+        "gpt-6.1-sol-launch-2026-09-29",
         {"input_nocache": "2.00", "cache_read": "0.10", "output": "10.00"},
         {"input_nocache": "50.0", "cache_read": "2.5", "output": "250.0"},
     ),
@@ -57,7 +59,9 @@ def test_gpt_6_1_models_resolve_with_pricing_page_values_from_effective_from():
 
 def test_gpt_6_1_models_are_unpriced_before_effective_from():
     catalog = load_rates()
-    for model in EXPECTED:
+    # gpt-6.1-sol starts 2026-09-29 since catalog 2026-11-24; its boundary is
+    # tested in tests/test_gpt_6_sol_rates.py.
+    for model in (m for m in EXPECTED if m != "gpt-6.1-sol"):
         resolved, period = catalog.rate_for(model, dt("2026-09-30T23:59:59+00:00"))
         assert resolved == model
         assert period is None

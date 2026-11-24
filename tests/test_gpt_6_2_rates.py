@@ -79,7 +79,7 @@ def test_gpt_reserve_has_no_entry_and_stays_unpriced():
 def test_existing_gpt_6_1_values_are_unchanged():
     catalog = load_rates()
     for model, rate_id, usd in (
-        ("gpt-6.1-sol", "gpt-6.1-sol-launch-date-unconfirmed", ("2.00", "0.10", "10.00")),
+        ("gpt-6.1-sol", "gpt-6.1-sol-launch-2026-09-29", ("2.00", "0.10", "10.00")),
         ("gpt-6.1-terra", "gpt-6.1-terra-launch-date-unconfirmed", ("1.00", "0.05", "5.00")),
     ):
         entry = catalog.models[model]
@@ -136,7 +136,7 @@ def test_fast_mode_is_2x_standard_and_no_prompt_tiers():
 
 def test_catalog_version_sources_and_note_record_gpt_6_2():
     catalog = load_rates()
-    assert catalog.catalog_version == "2026-11-20"
+    assert catalog.catalog_version == "2026-11-24"
     urls = [(s.get("url"), s.get("retrieved_at")) for s in catalog.sources]
     assert urls.count(("https://developers.openai.com/api/docs/pricing", "2026-11-20")) == 1
     assert urls.count(("https://help.openai.com/en/articles/9624314-model-release-notes", "2026-11-20")) == 1
