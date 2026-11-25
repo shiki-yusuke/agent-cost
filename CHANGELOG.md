@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.5.8
+
+Catalog schema "3" adds optional `promotions` that override the fast
+multiplier for an (agent, mode) within a time window, for use in a
+`--rates` catalog. The bundled catalog is unchanged (schema "2").
 
 Catalog promotions: a local catalog can now express a time-bounded fast
 multiplier override (e.g. Codex Fast billed at the standard rate). The bundled
