@@ -882,3 +882,89 @@ def test_snapshot_after_adopted_startup_waits_for_next_turn(tmp_path):
 def test_startup_snapshot_does_not_override_captured_tier(tmp_path):
     events = [_tier_settings("gpt-6.2-sol", "priority")] + _startup_turn("default") + [_tier_usage(1)]
     assert _outcome(_tier_facts(tmp_path, events)) == [_SOL_FAST]
+
+
+# ── startup snapshot r2: review findings (allowlist, validation, capture, overlap) ──
+
+def _item(**payload):
+    return _at({"type": "response_item", "payload": payload}, _CTX_AT)
+
+
+_SETUP = [_item(type="additional_tools", role="developer", tools=[]),
+          _item(type="message", role="developer"), _item(type="message", role="system"),
+          _item(type="message", role="user"),
+          _at({"type": "world_state", "payload": {"full": True, "state": {}}}, _CTX_AT)]
+
+
+def test_startup_snapshot_after_turn_setup_records(tmp_path):
+    # Real 2026-11-25 order: task_started > additional_tools > message(s) > world_state > turn_context.
+    events = _startup_turn(before_ctx=_SETUP) + [_tier_usage(1)]
+    assert _outcome(_tier_facts(tmp_path, events)) == [_SOL_FAST]
+
+
+def _settings_with(**changes):
+    event = _tier_settings("gpt-6.2-sol", "priority")
+    event["payload"]["thread_settings"].update(changes)
+    return _at(event, "2026-11-20T03:00:00.001Z")
+
+
+def _bad_owned_settings():
+    event = _tier_settings("gpt-6.2-sol", "priority")
+    event["payload"]["thread_settings"] = []
+    return _at(event, _CTX_AT)
+
+
+def _turn_marker(kind, turn):
+    return _tier_event(kind, turn_id=turn, collaboration_mode_kind="default")
+
+
+def _turn_c():
+    start = _at(_turn_marker("task_started", "C"), "2026-11-20T02:59:58Z")
+    return [start, _tier_ctx(turn="C"), _at(_tier_settings("gpt-6.2-sol", "priority"), _CTX_AT)]
+
+
+@pytest.mark.parametrize("events", [
+    # P1: anything but turn-setup records between the start and the first context.
+    pytest.param(_startup_turn(before_ctx=[_item(type="message", role="assistant")]), id="assistant_message"),
+    pytest.param(_startup_turn(before_ctx=[_item(type="message")]), id="message_without_role"),
+    pytest.param(_startup_turn(before_ctx=[_item(type="reasoning")]), id="reasoning"),
+    pytest.param(_startup_turn(before_ctx=[_item(type="function_call", name="x")]), id="function_call"),
+    pytest.param(_startup_turn(before_ctx=[_SETUP[0], _tier_event("agent_message")]), id="other_event_msg"),
+    # P1: the Astra path's snapshot checks (provider, collaboration_mode, nested model).
+    pytest.param(_startup_turn()[:-1] + [_settings_with(model_provider_id="azure")], id="other_provider"),
+    pytest.param(_startup_turn()[:-1] + [_settings_with(collaboration_mode="default")], id="collab_not_object"),
+    pytest.param(_startup_turn()[:-1] + [_settings_with(
+        collaboration_mode={"settings": {"model": "gpt-5.6-terra"}})], id="nested_model_differs"),
+    # P2: a snapshot captured at the start, even without a tier.
+    pytest.param([_tier_settings("gpt-6.2-sol")] + _startup_turn(), id="captured_without_tier"),
+    pytest.param([_tier_settings("gpt-6.2-sol", None)] + _startup_turn(), id="captured_null_tier"),
+    # P2: overlap lasts until every open turn has closed.
+    pytest.param([_turn_marker("task_started", "A"), _turn_marker("task_started", "B"),
+                  _turn_marker("task_complete", "B")] + _turn_c(), id="earlier_turn_still_open"),
+    # P2: a non-object payload is malformed on the ordinary path too.
+    pytest.param(_startup_turn(before_ctx=[_at({"type": "world_state", "payload": []}, _CTX_AT)]),
+                 id="world_state_payload_not_object"),
+    pytest.param(_startup_turn(before_ctx=[_at({"type": "event_msg", "payload": []}, _CTX_AT)]),
+                 id="event_payload_not_object"),
+    # P2: a context of the same turn before its start makes the later one not the first.
+    pytest.param([_tier_ctx(model="gpt-5.6-terra")] + _startup_turn(), id="pre_start_context_other_model"),
+    pytest.param([_tier_ctx()] + _startup_turn(), id="pre_start_context_same_model"),
+    # P2: an invalid owned snapshot in the turn spoils it.
+    pytest.param(_startup_turn(before_ctx=[_bad_owned_settings()]), id="invalid_owned_snapshot_before_context"),
+    # P3: fractional seconds are compared exactly.
+    pytest.param(_startup_turn(snap_at="2026-11-20T03:00:01.000000001Z"), id="one_nanosecond_over_1s"),
+])
+def test_startup_review_findings_keep_mid_turn_handling(tmp_path, events):
+    facts = _tier_facts(tmp_path, [*events, _tier_usage(1)])
+    assert _outcome(facts)[-1] == _UNKNOWN_TIER
+
+
+def test_startup_snapshot_after_overlap_resolved(tmp_path):
+    events = [_turn_marker("task_started", "A"), _turn_marker("task_started", "B"),
+              _turn_marker("task_complete", "B"), _turn_marker("task_complete", "A")] + _turn_c()
+    assert _outcome(_tier_facts(tmp_path, [*events, _tier_usage(1)])) == [_SOL_FAST]
+
+
+def test_startup_snapshot_exactly_1s_with_nanoseconds(tmp_path):
+    events = _startup_turn(snap_at="2026-11-20T03:00:01.000000000Z") + [_tier_usage(1)]
+    assert _outcome(_tier_facts(tmp_path, events)) == [_SOL_FAST]

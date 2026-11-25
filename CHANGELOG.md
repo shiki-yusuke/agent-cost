@@ -5,17 +5,20 @@
 ### Fixed
 
 - Codex reader: a `thread_settings_applied` snapshot written while a turn is
-  initialized (the record directly after the turn's first `turn_context`, same
-  turn ID and model, timestamps at most 1 second apart, before any
-  `token_count`/`token_usage_record`, with no earlier snapshot in or captured
-  for the turn and no overlap, malformed record or invalid snapshot) now sets
+  initialized (the record directly after the turn's first `turn_context`, with
+  only turn-setup records — tools, non-assistant messages, `world_state` —
+  between the start and that context, same turn ID and model, a valid owned
+  snapshot, timestamps at most 1 second apart compared exactly, no earlier
+  snapshot in or captured for the turn and no overlap, malformed record or
+  invalid snapshot) now sets
   that turn's tier, as if it had arrived before `task_started`. Codex builds in
   use from 2026-11-25 write the Fast (`priority`) snapshot this way, so those
   turns were reported as model `(unknown)` / mode `unknown` and unpriced; they
   are now `fast` (ordinary path, which also requires the DB model to match) or
   priced Astra turns. Any other mid-turn snapshot keeps the previous handling.
-  Rollouts without such snapshots are unchanged; reports covering 2026-11-25
-  or later should be regenerated.
+  Rollouts without such snapshots are unchanged. Astra rollouts from before
+  2026-11-25 can also contain such snapshots and newly become priced, so
+  regenerate any report that covers 2026-11-25 or later, or any Astra usage.
 
 ## 0.5.8
 

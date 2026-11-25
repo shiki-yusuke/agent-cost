@@ -129,17 +129,26 @@ owned snapshot after `task_started`, directly after the turn's first
 `turn_context` and at the same timestamp (under 1 ms apart), before any response
 or usage record. Such a snapshot is treated as the turn's own setting, exactly as
 if it had arrived before `task_started`, only when all of these hold: the turn
-started with no captured snapshot and has seen no owned snapshot yet; the
-snapshot is the record directly after the turn's first `turn_context` (same turn
-ID) and names the same model; both records carry parseable timestamps at most
-1 second apart; no `token_count` with totals or `token_usage_record` was seen in
-the turn, and nothing at all came between the context and the snapshot; and no
-overlap, malformed record, invalidation, invalid owned snapshot or contradicting
-context was seen in the turn. Its tier is read as before (`priority` Fast,
-`default` Standard, anything else or missing `unknown`). The same rule applies to
-the ordinary (non-Astra) path, which additionally requires the snapshot model to
-equal the DB model written into the facts; there a missing/null tier falls back
-to the existing suffix/collaboration detection.
+started with no captured owned snapshot (even one without a tier) and has seen
+no owned snapshot yet; between the start and the turn's first `turn_context`
+only turn-setup records appear (`response_item` `additional_tools`,
+`response_item` `message` with role `user`/`developer`/`system`, `world_state`);
+the snapshot is the record directly after that first `turn_context` (same turn
+ID, and no context with that ID before the start) and names the same model; the
+snapshot passes the checks above (`model_provider_id` `openai`, object
+`collaboration_mode` whose nested model agrees); both records carry parseable
+timestamps at most 1 second apart, compared with every fractional digit (so
+`1.000000001` s is too far); and no overlap (another turn still open at the
+start, or since the last moment every open turn was closed), malformed record
+(including a non-object payload), invalidation, invalid owned snapshot or
+contradicting context was seen in the turn. Its tier is read as before
+(`priority` Fast, `default` Standard, anything else or missing `unknown`). The
+same rule applies to the ordinary (non-Astra) path, which additionally requires
+the snapshot model to equal the DB model written into the facts; there a
+missing/null tier falls back to the existing suffix/collaboration detection.
+An invalid owned snapshot before the start does not block a later startup
+snapshot: like the same valid snapshot placed right before `task_started`, it
+clears the earlier invalid one and prices the turn.
 
 Deliberately not done: any other snapshot that first appears after the turn
 started is not used for pricing. It is indistinguishable from a tier change meant

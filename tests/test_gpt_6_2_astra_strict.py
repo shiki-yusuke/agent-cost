@@ -385,3 +385,70 @@ def test_startup_snapshot_after_malformed_line_is_not_adopted(tmp_path):
     facts, malformed, _ = parse_rollout_facts(path, model_raw="gpt-6.2-astra", session_id=SESSION)
     assert malformed == 1
     assert _attributed(facts) == [UNKNOWN]
+
+
+# ── startup snapshot r2: review findings ──
+
+def _item(**payload):
+    return {"type": "response_item", "timestamp": "2026-11-20T03:00:00Z", "payload": payload}
+
+
+_SETUP = [_item(type="additional_tools", role="developer", tools=[]),
+          _item(type="message", role="developer"), _item(type="message", role="user"),
+          {"type": "world_state", "timestamp": "2026-11-20T03:00:00Z", "payload": {"full": True}}]
+
+
+def test_startup_snapshot_after_turn_setup_records(tmp_path):
+    assert _attributed(_read(tmp_path, _startup(before_ctx=_SETUP) + [_count(1)])) == [
+        ("gpt-6.2-astra", "fast", "priced")]
+
+
+def _bad_shape():
+    bad = _settings("gpt-6.2-astra", "priority")
+    bad["payload"]["thread_settings"] = []
+    return bad
+
+
+def _turn_c():
+    return [_event("task_started", turn_id="C"), _tctx("C"), _settings("gpt-6.2-astra", "priority")]
+
+
+@pytest.mark.parametrize("events, expected", [
+    pytest.param(_startup(before_ctx=[_item(type="message", role="assistant")]), [RECOVERED],
+                 id="assistant_message_before_context"),
+    pytest.param(_startup(before_ctx=[_item(type="reasoning")]), [RECOVERED], id="reasoning_before_context"),
+    pytest.param(_startup(before_ctx=[_item(type="function_call")]), [RECOVERED],
+                 id="function_call_before_context"),
+    pytest.param(_startup(before_ctx=[_event("agent_message")]), [RECOVERED], id="other_event_before_context"),
+    pytest.param([_event("task_started", turn_id="A"), _event("task_started", turn_id="B"),
+                  _event("task_complete", turn_id="B")] + _turn_c(), [RECOVERED], id="earlier_turn_still_open"),
+    pytest.param(_startup(before_ctx=[{"type": "world_state", "timestamp": "2026-11-20T03:00:00Z",
+                                       "payload": []}]), [UNKNOWN], id="world_state_payload_not_object"),
+    pytest.param(_startup(before_ctx=[_bad_shape()]), [UNKNOWN], id="invalid_owned_snapshot_before_context"),
+    pytest.param(_startup(snap=_snap_at("gpt-6.2-astra", "priority", "2026-11-20T03:00:01.000000001Z")),
+                 [RECOVERED], id="one_nanosecond_over_1s"),
+])
+def test_startup_review_findings_keep_existing_attribution(tmp_path, events, expected):
+    assert _attributed(_read(tmp_path, [*events, _count(2)])) == expected
+
+
+def test_startup_snapshot_after_overlap_resolved(tmp_path):
+    events = [_event("task_started", turn_id="A"), _event("task_started", turn_id="B"),
+              _event("task_complete", turn_id="B"), _event("task_complete", turn_id="A")] + _turn_c()
+    assert _attributed(_read(tmp_path, [*events, _count(1)])) == [("gpt-6.2-astra", "fast", "priced")]
+
+
+def test_startup_snapshot_exactly_1s_with_nanoseconds(tmp_path):
+    events = _startup(snap=_snap_at("gpt-6.2-astra", "priority", "2026-11-20T03:00:01.000000000Z"))
+    assert _attributed(_read(tmp_path, [*events, _count(1)])) == [("gpt-6.2-astra", "fast", "priced")]
+
+
+@pytest.mark.parametrize("kind", ["provider", "nested_model"])
+def test_startup_snapshot_after_pre_start_invalid_matches_pre_start_placement(tmp_path, kind):
+    # A startup snapshot counts as placed right before task_started, so it clears
+    # an earlier invalid snapshot exactly as that placement would.
+    valid = _settings("gpt-6.2-astra", "priority")
+    startup = [_bad(kind), _event("task_started", turn_id="t1"), _tctx(), valid, _count(1)]
+    before = [_bad(kind), valid, _event("task_started", turn_id="t1"), _tctx(), _count(1)]
+    expected = [("gpt-6.2-astra", "fast", "priced")]
+    assert _attributed(_read(tmp_path, startup)) == _attributed(_read(tmp_path, before)) == expected
