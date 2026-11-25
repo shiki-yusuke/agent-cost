@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.5.9
+
+Reader fix: Codex turns whose service_tier snapshot is written at turn setup
+(right after the first turn_context, before any usage) now use that tier on
+both the ordinary and the Astra path. No catalog or schema change.
 
 ### Fixed
 
