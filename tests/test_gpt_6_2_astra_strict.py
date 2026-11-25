@@ -420,8 +420,8 @@ def _turn_c():
     pytest.param(_startup(before_ctx=[_item(type="function_call")]), [RECOVERED],
                  id="function_call_before_context"),
     pytest.param(_startup(before_ctx=[_event("agent_message")]), [RECOVERED], id="other_event_before_context"),
-    pytest.param([_event("task_started", turn_id="A"), _event("task_started", turn_id="B"),
-                  _event("task_complete", turn_id="B")] + _turn_c(), [RECOVERED], id="earlier_turn_still_open"),
+    # (r4: "earlier turn still open" moved to test_startup_overlap_follows_existing_turn_state;
+    # overlap now follows the existing active-turn state, which B's completion cleared.)
     pytest.param(_startup(before_ctx=[{"type": "world_state", "timestamp": "2026-11-20T03:00:00Z",
                                        "payload": []}]), [UNKNOWN], id="world_state_payload_not_object"),
     pytest.param(_startup(before_ctx=[_bad_shape()]), [UNKNOWN], id="invalid_owned_snapshot_before_context"),
@@ -475,10 +475,8 @@ def test_startup_snapshot_after_pre_start_invalid_matches_pre_start_placement(tm
                  [RECOVERED], id="1e-19_over_1s"),
     pytest.param(_startup(snap=_snap_at("gpt-6.2-astra", "priority", "2026-11-20T03:00:00Z\n")),
                  [RECOVERED], id="trailing_newline"),
-    # P3: out-of-range UTC conversion (OverflowError) means "not adopted".
-    pytest.param(_startup(ctx=_tctx(at="0001-01-01T00:00:00+09:00"),
-                          snap=_snap_at("gpt-6.2-astra", "priority", "0001-01-01T00:00:00.5+09:00")),
-                 [RECOVERED], id="utc_overflow"),
+    # (r4: "utc_overflow" no longer applies: the time difference is integer
+    # arithmetic, so year 0001 with an offset is read; see test_reader_codex.)
 ])
 def test_startup_r3_findings_keep_existing_attribution(tmp_path, events, expected):
     facts = _read(tmp_path, [*events, _count(1)])
@@ -489,3 +487,95 @@ def test_startup_r3_findings_keep_existing_attribution(tmp_path, events, expecte
 def test_startup_timestamp_with_comma_fraction(tmp_path):
     events = _startup(snap=_snap_at("gpt-6.2-astra", "priority", "2026-11-20T03:00:00,5Z")) + [_count(1)]
     assert _attributed(_read(tmp_path, events)) == [("gpt-6.2-astra", "fast", "priced")]
+
+
+# ── startup snapshot r4: integer timestamps, overlap from the existing turn state, malformed count ──
+
+from tests.test_reader_codex import _STARTUP_TS_ADOPTED, _STARTUP_TS_NOT_ADOPTED  # noqa: E402
+
+FAST = ("gpt-6.2-astra", "fast", "priced")
+
+
+@pytest.mark.parametrize("ctx_at, snap_at", _STARTUP_TS_NOT_ADOPTED)
+def test_startup_timestamp_outside_form_or_range_is_not_adopted(tmp_path, ctx_at, snap_at):
+    ctx = _tctx(at=ctx_at) if ctx_at else None
+    facts = _read(tmp_path, _startup(ctx=ctx, snap=_snap_at("gpt-6.2-astra", "priority", snap_at)) + [_count(1)])
+    assert _attributed(facts) == [RECOVERED]
+    assert [f.tokens for f in facts] == [1_000_000]  # aggregation keeps running
+
+
+@pytest.mark.parametrize("ctx_at, snap_at", _STARTUP_TS_ADOPTED)
+def test_startup_timestamp_forms_are_adopted(tmp_path, ctx_at, snap_at):
+    ctx = _tctx(at=ctx_at) if ctx_at else None
+    facts = _read(tmp_path, _startup(ctx=ctx, snap=_snap_at("gpt-6.2-astra", "priority", snap_at)) + [_count(1)])
+    assert _attributed(facts) == [FAST]
+
+
+def _turn_d(pre_start=False):
+    d = [_event("task_started", turn_id="D"), _tctx("D"), _settings("gpt-6.2-astra", "priority")]
+    return [d[2], d[0], d[1]] if pre_start else d
+
+
+def _seq(prefix, turns, pre_start=False):
+    events = list(prefix)
+    for n, turn in enumerate(turns, 1):
+        events += turn(pre_start) + [_count(n)]
+    return events
+
+
+def _c(pre_start=False):
+    c = _turn_c()
+    return [c[2], c[0], c[1]] if pre_start else c
+
+
+_ANON = _event("task_started")
+_ID_LESS = _event("task_complete")
+
+
+@pytest.mark.parametrize("prefix, turns, expected", [
+    # B's completion closes the active turn; the anonymous completion closes nothing.
+    pytest.param([_ANON, _event("task_started", turn_id="B"), _event("task_complete", turn_id="B"), _ID_LESS],
+                 [_c], [FAST], id="anon_B_Bdone_anondone"),
+    # ID-less completions do not close B under the existing rule, so C overlaps
+    # (as with a pre-start snapshot); once C completes, D is adopted.
+    pytest.param([_ANON, _event("task_started", turn_id="B"), _ID_LESS, _ID_LESS],
+                 [lambda p: _c(p), lambda p: [_event("task_complete", turn_id="C")] + _turn_d(p)],
+                 [UNKNOWN, FAST], id="anon_B_idless_done_x2"),
+    pytest.param([_event("task_started", turn_id="A"), _event("task_started", turn_id="B"),
+                  _event("task_complete", turn_id="B")], [_c], [FAST], id="A_B_Bdone"),
+])
+def test_startup_overlap_follows_existing_turn_state(tmp_path, prefix, turns, expected):
+    startup = _attributed(_read(tmp_path, _seq(prefix, turns)))
+    assert startup == _attributed(_read(tmp_path, _seq(prefix, turns, pre_start=True))) == expected
+
+
+@pytest.mark.parametrize("prefix", [
+    pytest.param([_event("task_started", turn_id="A")], id="A_active"),
+    pytest.param([_ANON, _event("task_started", turn_id="B")], id="anon_then_B_active"),
+    pytest.param([_event("task_started", turn_id="B"), _ID_LESS], id="idless_completion_keeps_B_active"),
+])
+def test_startup_in_overlapping_turn_is_not_adopted(tmp_path, prefix):
+    assert _attributed(_read(tmp_path, _seq(prefix, [_c]))) == [UNKNOWN]
+
+
+def test_missing_payload_is_counted_without_changing_aggregates(tmp_path):
+    events = _startup() + [_count(1), _count(2)]
+    base = tmp_path / "base.jsonl"
+    base.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    bad = tmp_path / "bad.jsonl"
+    lines = [*events[:-1], {"type": "world_state"}, {"type": "event_msg"}, events[-1]]
+    bad.write_text("\n".join(json.dumps(e) for e in lines) + "\n")
+    base_facts, base_malformed, _ = parse_rollout_facts(base, model_raw="gpt-6.2-astra", session_id=SESSION)
+    facts, malformed, _ = parse_rollout_facts(bad, model_raw="gpt-6.2-astra", session_id=SESSION)
+    assert base_malformed == 0 and malformed == 2
+    assert _attributed(facts) == _attributed(base_facts) == [FAST, FAST]
+    assert [f.tokens for f in facts] == [f.tokens for f in base_facts]
+
+
+def test_missing_payload_before_snapshot_is_counted_and_not_startup(tmp_path):
+    path = tmp_path / "r.jsonl"
+    events = _startup(before_ctx=[{"type": "world_state", "timestamp": "2026-11-20T03:00:00Z"}]) + [_count(1)]
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    facts, malformed, _ = parse_rollout_facts(path, model_raw="gpt-6.2-astra", session_id=SESSION)
+    assert malformed == 1
+    assert _attributed(facts) == [RECOVERED]

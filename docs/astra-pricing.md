@@ -137,11 +137,17 @@ the snapshot is the record directly after that first `turn_context` (same turn
 ID, and no context with that ID before the start) and names the same model; the
 snapshot passes the checks above (`model_provider_id` `openai`, object
 `collaboration_mode` whose nested model agrees); both records carry timestamps
-of the form `YYYY-MM-DDTHH:MM:SS[.fraction|,fraction][Z|±HH:MM|±HHMM]` (exactly as
-written, no trailing whitespace) at most 1 second apart, compared exactly with
-every fractional digit (so `1.000000001` s is too far), and a timestamp that
-cannot be converted to UTC means "not adopted"; and no overlap (another turn
-still open at the start, or since the last moment every open turn was closed),
+of the form `YYYY-MM-DDTHH:MM:SS[.fraction|,fraction](Z|±HH:MM|±HHMM|±HH)`
+(1-9 fractional digits, an offset required, exactly as written, no trailing
+whitespace) at most 1 second apart, computed with integer arithmetic only (the
+same on every Python version) and compared exactly with every fractional digit
+(so `1.000000001` s is too far); a timestamp outside that form or with an
+out-of-range field (month, day of the month, hour 0-23, minute and second 0-59,
+offset hour 0-23 and minute 0-59) means "not adopted". Minute-precision
+(`03:00Z`) and naive timestamps are not adopted either (conservative). No overlap:
+the path's existing turn state had no active turn when the turn started (a turn
+its existing rule has closed counts as closed here too, so this matches the
+same snapshot placed before `task_started`); and no
 malformed record (including a non-object or missing payload), invalidation,
 invalid owned snapshot or contradicting context was seen in the turn. Contexts
 are remembered per turn ID for the whole rollout, so a context of turn B seen
@@ -152,9 +158,9 @@ means the snapshot is not adopted. Its tier is read as before (`priority` Fast,
 `default` Standard, anything else or missing `unknown`). The same rule applies
 to the ordinary (non-Astra) path, which additionally requires the snapshot
 model to equal the DB model written into the facts; there a missing/null tier
-falls back to the existing suffix/collaboration detection, and a completion
-that closes the active turn under the existing rule (including one without a
-turn ID) also ends that turn for the overlap check.
+falls back to the existing suffix/collaboration detection. Lines with a
+non-object or missing payload are counted in `malformed_events` on both paths;
+on the ordinary path they carry nothing it reads, so only the count changes.
 
 Invalid snapshots before the start differ between the paths. On the Astra path
 an invalid owned snapshot before the start does not block a later startup

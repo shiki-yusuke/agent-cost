@@ -938,9 +938,8 @@ def _turn_c():
     # P2: a snapshot captured at the start, even without a tier.
     pytest.param([_tier_settings("gpt-6.2-sol")] + _startup_turn(), id="captured_without_tier"),
     pytest.param([_tier_settings("gpt-6.2-sol", None)] + _startup_turn(), id="captured_null_tier"),
-    # P2: overlap lasts until every open turn has closed.
-    pytest.param([_turn_marker("task_started", "A"), _turn_marker("task_started", "B"),
-                  _turn_marker("task_complete", "B")] + _turn_c(), id="earlier_turn_still_open"),
+    # (r4: "earlier turn still open" moved to test_startup_overlap_follows_existing_turn_state;
+    # overlap now follows the existing turn state, which B's start replaced A in.)
     # P2: a non-object payload is malformed on the ordinary path too.
     pytest.param(_startup_turn(before_ctx=[_at({"type": "world_state", "payload": []}, _CTX_AT)]),
                  id="world_state_payload_not_object"),
@@ -996,9 +995,8 @@ def _turn_b_after_a_with_b_context():
     pytest.param(_startup_turn(snap_at="2026-11-20T03:00:01.0000000000000000001Z"), id="1e-19_over_1s"),
     # P3: a trailing newline is not a timestamp _to_utc reads.
     pytest.param(_startup_turn(snap_at="2026-11-20T03:00:00.001Z\n"), id="trailing_newline"),
-    # P3: out-of-range UTC conversion (OverflowError) means "not adopted".
-    pytest.param(_startup_turn(ctx=_tier_ctx(at="0001-01-01T00:00:00+09:00"),
-                               snap_at="0001-01-01T00:00:00.5+09:00"), id="utc_overflow"),
+    # (r4: "utc_overflow" no longer applies: the time difference is integer
+    # arithmetic, so year 0001 with an offset is read; see _STARTUP_TS_ADOPTED.)
 ])
 def test_startup_r3_findings_keep_mid_turn_handling(tmp_path, events):
     facts = _tier_facts(tmp_path, [*events, _tier_usage(1)])
@@ -1025,3 +1023,127 @@ def test_startup_after_id_less_completion_of_previous_turn(tmp_path):
 def test_startup_timestamp_with_comma_fraction(tmp_path):
     events = _startup_turn(snap_at="2026-11-20T03:00:00,125Z") + [_tier_usage(1)]
     assert _outcome(_tier_facts(tmp_path, events)) == [_SOL_FAST]
+
+
+# ── startup snapshot r4: integer timestamps, overlap from the existing turn state, malformed count ──
+
+_STARTUP_TS_NOT_ADOPTED = [
+    # Shape: more than 9 fractional digits (incl. past int()'s digit limit), minute
+    # precision, naive, space separator, dangling colon in the offset.
+    pytest.param(None, "2026-11-20T03:00:00.0000000001Z", id="fraction_10_digits"),
+    pytest.param(None, "2026-11-20T03:00:00." + "0" * 4301 + "Z", id="fraction_4301_zeros"),
+    pytest.param(None, "2026-11-20T03:00:00." + "1" * 4301 + "Z", id="fraction_4301_digits"),
+    pytest.param(None, "2026-11-20T03:00Z", id="minute_precision"),
+    pytest.param(None, "2026-11-20T03:00:00", id="naive"),
+    pytest.param(None, "2026-11-20 03:00:00Z", id="space_separator"),
+    pytest.param(None, "2026-11-20T03:00:00+00:", id="offset_dangling_colon"),
+    # Range: each would land exactly on the context's instant if it rolled over.
+    pytest.param(None, "2026-11-19T27:00:00Z", id="hour_27"),
+    pytest.param(None, "2026-11-20T02:60:00Z", id="minute_60"),
+    pytest.param(None, "2026-11-20T02:59:60Z", id="second_60"),
+    pytest.param(None, "2026-10-51T03:00:00Z", id="day_51"),
+    pytest.param("2026-03-01T03:00:00Z", "2026-02-29T03:00:00Z", id="feb_29_non_leap"),
+    pytest.param(None, "2026-11-20T04:00:00+00:60", id="offset_minute_60"),
+    pytest.param(None, "2026-11-21T03:00:00+24:00", id="offset_hour_24"),
+]
+_STARTUP_TS_ADOPTED = [
+    pytest.param(None, "2026-11-20T12:00:00.5+09:00", id="offset_hh_mm"),
+    pytest.param(None, "2026-11-20T12:00:00.5+0900", id="offset_hhmm"),
+    pytest.param(None, "2026-11-20T12:00:00.5+09", id="offset_hh"),
+    pytest.param(None, "2026-11-19T22:00:00-05", id="negative_offset"),
+    pytest.param(None, "2026-11-20T03:00:00,999999999Z", id="comma_9_digits"),
+    pytest.param("2024-02-29T03:00:00Z", "2024-02-29T03:00:00.5Z", id="feb_29_leap"),
+    pytest.param("0001-01-01T00:00:00+09:00", "0001-01-01T00:00:00.5+09:00", id="year_0001_with_offset"),
+]
+
+
+def _with_malformed(events, path):
+    lines = [json.dumps(e) for e in events]
+    path.write_text("\n".join(lines) + "\n")
+    return parse_rollout_facts(path, model_raw="gpt-6.2-sol", session_id="t1")
+
+
+@pytest.mark.parametrize("ctx_at, snap_at", _STARTUP_TS_NOT_ADOPTED)
+def test_startup_timestamp_outside_form_or_range_is_not_adopted(tmp_path, ctx_at, snap_at):
+    ctx = _tier_ctx(at=ctx_at) if ctx_at else None
+    facts = _tier_facts(tmp_path, _startup_turn(ctx=ctx, snap_at=snap_at) + [_tier_usage(1)])
+    assert _outcome(facts) == [_UNKNOWN_TIER]
+    assert [f.tokens for f in facts] == [1_000_000]  # aggregation keeps running
+
+
+@pytest.mark.parametrize("ctx_at, snap_at", _STARTUP_TS_ADOPTED)
+def test_startup_timestamp_forms_are_adopted(tmp_path, ctx_at, snap_at):
+    ctx = _tier_ctx(at=ctx_at) if ctx_at else None
+    facts = _tier_facts(tmp_path, _startup_turn(ctx=ctx, snap_at=snap_at) + [_tier_usage(1)])
+    assert _outcome(facts) == [_SOL_FAST]
+
+
+def test_exact_seconds_is_integer_arithmetic():
+    import calendar
+    from fractions import Fraction
+    from agent_cost.readers.codex import _exact_seconds
+
+    whole = calendar.timegm((2026, 11, 20, 3, 0, 0))
+    assert _exact_seconds("2026-11-20T03:00:00Z") == whole
+    assert _exact_seconds("2026-11-20T12:30:00,125+09:30") == whole + Fraction(1, 8)
+    assert _exact_seconds("1970-01-01T00:00:00Z") == 0
+    assert _exact_seconds("2000-02-29T23:59:59.999999999-23:59") == (
+        calendar.timegm((2000, 3, 1, 23, 58, 59)) + Fraction(999999999, 10**9))
+    for bad in ["2026-00-20T03:00:00Z", "2026-13-20T03:00:00Z", "2026-11-00T03:00:00Z",
+                "2026-11-31T03:00:00Z", "2026-11-20T24:00:00Z", "2026-11-20T03:00:00+23:60",
+                "２０２６-11-20T03:00:00Z", None, 1, ""]:
+        assert _exact_seconds(bad) is None, bad
+
+
+def _seq_then_c(prefix, *, pre_start=False):
+    c = _turn_c()
+    if pre_start:  # the same snapshot placed before C's start
+        c = [c[2], c[0], c[1]]
+    return prefix + c + [_tier_usage(1)]
+
+
+_ANON_START = _tier_event("task_started", collaboration_mode_kind="default")
+_ID_LESS_DONE = _tier_event("task_complete")
+
+
+@pytest.mark.parametrize("prefix", [
+    pytest.param([_ANON_START, _turn_marker("task_started", "B"), _turn_marker("task_complete", "B"),
+                  _ID_LESS_DONE], id="anon_B_Bdone_anondone"),
+    pytest.param([_ANON_START, _turn_marker("task_started", "B"), _ID_LESS_DONE, _ID_LESS_DONE],
+                 id="anon_B_idless_done_x2"),
+    pytest.param([_turn_marker("task_started", "A"), _turn_marker("task_started", "B"),
+                  _turn_marker("task_complete", "B")], id="A_B_Bdone"),
+])
+def test_startup_overlap_follows_existing_turn_state(tmp_path, prefix):
+    # The existing rule has closed every turn it tracks, so C is not overlapped:
+    # its startup snapshot counts exactly as one placed before C's start.
+    startup = _outcome(_tier_facts(tmp_path, _seq_then_c(prefix)))
+    assert startup == _outcome(_tier_facts(tmp_path, _seq_then_c(prefix, pre_start=True))) == [_SOL_FAST]
+
+
+@pytest.mark.parametrize("prefix", [
+    pytest.param([_ANON_START], id="anonymous_turn_active"),
+    pytest.param([_ANON_START, _turn_marker("task_started", "B")], id="anon_then_B_active"),
+    pytest.param([_ANON_START, _turn_marker("task_started", "B"), _turn_marker("task_complete", "X")],
+                 id="other_turns_completion_keeps_B_active"),
+])
+def test_startup_in_overlapping_turn_is_not_adopted(tmp_path, prefix):
+    assert _outcome(_tier_facts(tmp_path, _seq_then_c(prefix))) == [_UNKNOWN_TIER]
+
+
+def test_malformed_shapes_are_counted_without_changing_aggregates(tmp_path):
+    events = _startup_turn() + [_tier_usage(1), _tier_usage(2)]
+    bad = [{"type": "event_msg", "payload": [1]}, {"type": "event_msg", "payload": None},
+           {"type": "world_state"}, {"type": "event_msg"}]
+    base_facts, base_malformed, _ = _with_malformed(events, tmp_path / "base.jsonl")
+    facts, malformed, _ = _with_malformed(events[:-1] + bad + events[-1:], tmp_path / "bad.jsonl")
+    assert base_malformed == 0 and malformed == len(bad)
+    assert _outcome(facts) == _outcome(base_facts) == [_SOL_FAST, _SOL_FAST]
+    assert [f.tokens for f in facts] == [f.tokens for f in base_facts]
+
+
+def test_missing_payload_before_snapshot_is_counted_and_not_startup(tmp_path):
+    events = _startup_turn(before_ctx=[_at({"type": "world_state"}, _CTX_AT)]) + [_tier_usage(1)]
+    facts, malformed, _ = _with_malformed(events, tmp_path / "r.jsonl")
+    assert malformed == 1
+    assert _outcome(facts) == [_UNKNOWN_TIER]
