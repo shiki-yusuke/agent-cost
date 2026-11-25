@@ -263,7 +263,10 @@ def test_mid_turn_updates_stay_unpriced_until_next_turn(tmp_path, new_model, new
     events += _start("t2", new_model, new_tier) + [_count(3)]
     facts = _read_events(tmp_path, events)
     assert price_fact(load_rates(), facts[0])[0] == 10
-    assert facts[1].model_key == "(unknown)"
+    # A tier-only change keeps the turn's exact Astra context model, which is now
+    # recovered with mode=unknown (still unpriced); a model change stays (unknown).
+    assert facts[1].model_key == ("gpt-6-astra" if new_model == "gpt-6-astra" else "(unknown)")
+    assert facts[1].mode == "unknown"
     assert price_fact(load_rates(), facts[1])[1] == "unpriced"
     assert price_fact(load_rates(), facts[2])[0] == (25 if new_model == "gpt-6-astra" else 5)
     assert _total(facts)["tokens"] == 3_000_000
@@ -308,6 +311,8 @@ def test_cli_mixed_priced_unpriced_contract(tmp_path, monkeypatch, capsys, comma
 @pytest.mark.parametrize("bad", ["{broken", {"type": "event_msg", "payload": []}, 3])
 def test_malformed_event_cannot_leave_stale_standard_setting(tmp_path, bad):
     facts = _read_events(tmp_path, _start() + [_count(1), bad, _count(2)])
+    # The malformed record also blocks model recovery for the rest of the turn.
+    assert [f.model_key for f in facts] == ["gpt-6-astra", "(unknown)"]
     assert _total(facts)["estimated_cost_usd"] == 10
     assert _total(facts)["unpriced_tokens"] == 1_000_000
 

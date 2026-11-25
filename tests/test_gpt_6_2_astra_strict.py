@@ -120,3 +120,180 @@ def test_normalized_variants_reach_the_guard(variant):
 
 def test_gpt_6_2_sol_stays_on_the_ordinary_path():
     assert price_fact(load_rates(), _fact(model="gpt-6.2-sol", mode="unknown"))[1] == "priced"
+
+
+# ── Astra model recovery (a) and identical mid-turn re-send (b1) ──
+
+def _ctx(turn, model="gpt-6.2-astra"):
+    return {"type": "turn_context", "payload": {"turn_id": turn, "model": model}}
+
+
+def _count(n):
+    return _event("token_count", info={"total_token_usage": {
+        "input_tokens": n * 1_000_000, "cached_input_tokens": 0, "output_tokens": 0}})
+
+
+def _bad(kind):
+    bad = _settings("gpt-6.2-astra", "default")
+    settings = bad["payload"]["thread_settings"]
+    if kind == "provider":
+        settings["model_provider_id"] = "other-provider"
+    else:
+        settings["collaboration_mode"]["settings"]["model"] = "gpt-6.2-sol"
+    return bad
+
+
+def _attributed(facts):
+    return [(f.model_key, f.mode, price_fact(load_rates(), f)[1]) for f in facts]
+
+
+UNKNOWN = ("(unknown)", "unknown", "unpriced")
+RECOVERED = ("gpt-6.2-astra", "unknown", "unpriced")
+
+
+def test_identical_astra_resend_keeps_pricing(tmp_path):
+    # P1: the same owned snapshot re-sent mid-turn (e.g. after compaction).
+    events = _turn("t1", complete=False) + [_settings("gpt-6.2-astra", "default"), _count(2)]
+    facts = _read(tmp_path, events)
+    assert _attributed(facts) == [("gpt-6.2-astra", "normal", "priced")] * 2
+    assert _total(facts)["estimated_cost_usd"] == 16
+
+
+def test_tier_only_resend_recovers_model_but_stays_unpriced(tmp_path):
+    events = _turn("t1", complete=False) + [_settings("gpt-6.2-astra", "priority"), _count(2)]
+    facts = _read(tmp_path, events)
+    assert _attributed(facts)[1] == RECOVERED
+    assert _total(facts)["unpriced_tokens"] == 1_000_000
+
+
+@pytest.mark.parametrize("shape", ["resend", "first_after_start"])
+def test_non_astra_turn_in_astra_rollout_is_not_recovered(tmp_path, shape):
+    events = _turn("t1", complete=True)
+    if shape == "resend":
+        events += _turn("t2", model="gpt-6.2-sol", n=2, complete=False)
+        events += [_settings("gpt-6.2-sol", "default"), _count(3)]
+        expected = [("gpt-6.2-sol", "normal", "priced"), UNKNOWN]
+        facts = _read(tmp_path, events)
+        assert _attributed(facts)[1:] == expected
+        assert facts[-1].tokens == 1_000_000
+        return
+    # The non-Astra turn comes first so it starts with no captured snapshot at
+    # all; only the non-Astra rule can block recovery (the later Astra turn just
+    # makes this an Astra-containing rollout).
+    events = [_event("task_started", turn_id="t0"), _ctx("t0", "gpt-6.2-sol"),
+              _settings("gpt-6.2-sol", "default"), _count(1), _event("task_complete", turn_id="t0"),
+              _settings("gpt-6.2-astra", "default"), _event("task_started", turn_id="t1"),
+              _ctx("t1"), _count(2)]
+    facts = _read(tmp_path, events)
+    assert _attributed(facts) == [UNKNOWN, ("gpt-6.2-astra", "normal", "priced")]
+
+
+@pytest.mark.parametrize("tier", ["default", None])
+def test_first_snapshot_after_turn_start_recovers_model_only(tmp_path, tier):
+    # P2 (with and without a tier): the snapshot cannot be told apart from an update.
+    events = [_event("task_started", turn_id="t1"), _ctx("t1"),
+              _settings("gpt-6.2-astra", tier), _count(1)]
+    assert _attributed(_read(tmp_path, events)) == [RECOVERED]
+
+
+def test_turn_without_any_snapshot_recovers_model_only(tmp_path):
+    # P3: no owned snapshot in the whole rollout.
+    events = [_event("task_started", turn_id="t1"), _ctx("t1"), _count(1)]
+    assert _attributed(_read(tmp_path, events)) == [RECOVERED]
+
+
+@pytest.mark.parametrize("kind", ["provider", "nested_model"])
+@pytest.mark.parametrize("where", ["before_start", "mid_turn"])
+def test_owned_invalid_snapshot_blocks_recovery(tmp_path, kind, where):
+    if where == "before_start":
+        events = [_bad(kind), _event("task_started", turn_id="t1"), _ctx("t1"), _count(1)]
+    else:
+        events = [_event("task_started", turn_id="t1"), _ctx("t1"), _bad(kind), _count(1)]
+    assert _attributed(_read(tmp_path, events)) == [UNKNOWN]
+
+
+def test_context_snapshot_model_mismatch_is_not_recovered(tmp_path):
+    events = [_settings("gpt-6.2-sol", "default"), _event("task_started", turn_id="t1"),
+              _ctx("t1"), _count(1)]
+    assert _attributed(_read(tmp_path, events)) == [UNKNOWN]
+    mid = [_event("task_started", turn_id="t1"), _ctx("t1"),
+           _settings("gpt-6.2-sol", "default"), _count(1)]
+    assert _attributed(_read(tmp_path, mid)) == [UNKNOWN]
+
+
+def test_overlapping_turn_is_not_recovered(tmp_path):
+    # No snapshot at all, so only the overlap (t1 still active at t2's start) blocks it.
+    events = [_event("task_started", turn_id="t1"), _ctx("t1", "gpt-6.2-sol"), _count(1),
+              _event("task_started", turn_id="t2"), _ctx("t2"), _count(2)]
+    assert _attributed(_read(tmp_path, events))[1] == UNKNOWN
+
+
+def test_context_model_change_within_turn_is_not_recovered(tmp_path):
+    events = [_event("task_started", turn_id="t1"), _ctx("t1", "gpt-6.2-sol"),
+              _ctx("t1", "gpt-6.2-astra"), _count(1)]
+    assert _attributed(_read(tmp_path, events)) == [UNKNOWN]
+
+
+def test_invalid_then_valid_snapshot_in_same_turn_is_not_recovered(tmp_path):
+    events = _turn("t1", complete=False) + [_bad("provider"), _settings("gpt-6.2-astra", "default"),
+                                            _count(2)]
+    assert _attributed(_read(tmp_path, events))[1] == UNKNOWN
+
+
+@pytest.mark.parametrize("shape", ["P2", "P3"])
+def test_invalid_then_valid_before_start_allows_recovery(tmp_path, shape):
+    events = [_bad("provider"), _settings("gpt-6.2-astra", "default")]
+    if shape == "P2":
+        # The pre-start valid snapshot is model-only evidence here: an Astra
+        # snapshot of another tier arrives after the start.
+        events += [_event("task_started", turn_id="t1"), _ctx("t1"),
+                   _settings("gpt-6.2-astra", "priority"), _count(1)]
+    else:
+        # A foreign snapshot clears the pending setting without tainting, so the
+        # turn starts with no captured snapshot (P3 shape).
+        foreign = _settings("gpt-6.2-astra", "default")
+        foreign["payload"]["thread_id"] = "other-thread"
+        events += [foreign, _event("task_started", turn_id="t1"), _ctx("t1"), _count(1)]
+    facts = _read(tmp_path, events)
+    assert _attributed(facts) == [RECOVERED]
+    assert _total(facts)["unpriced_tokens"] == 1_000_000
+
+
+def _collab(value):
+    snap = _settings("gpt-6.2-astra", "default")
+    snap["payload"]["thread_settings"]["collaboration_mode"] = value
+    return snap
+
+
+@pytest.mark.parametrize("value,expected", [
+    (None, ("gpt-6.2-astra", "normal", "priced")),  # null = not stated: still identical
+    ([], UNKNOWN), ("", UNKNOWN), (0, UNKNOWN),  # wrong type: invalid owned snapshot
+])
+def test_resend_with_null_or_wrong_type_collaboration_mode(tmp_path, value, expected):
+    events = _turn("t1", complete=False) + [_collab(value), _count(2)]
+    assert _attributed(_read(tmp_path, events))[1] == expected
+
+
+def test_missing_collaboration_mode_resend_keeps_pricing(tmp_path):
+    snap = _settings("gpt-6.2-astra", "default")
+    del snap["payload"]["thread_settings"]["collaboration_mode"]
+    events = _turn("t1", complete=False) + [snap, _count(2)]
+    assert _attributed(_read(tmp_path, events))[1] == ("gpt-6.2-astra", "normal", "priced")
+
+
+def test_other_turn_context_in_between_does_not_block_recovery(tmp_path):
+    # The last context is t1's again and satisfies every (a) condition.
+    events = [_event("task_started", turn_id="t1"), _ctx("t1"), _ctx("other"), _ctx("t1"),
+              _count(1)]
+    assert _attributed(_read(tmp_path, events)) == [RECOVERED]
+    # Ending on the other turn's context still refuses recovery.
+    events = [_event("task_started", turn_id="t1"), _ctx("t1"), _ctx("other"), _count(1)]
+    assert _attributed(_read(tmp_path, events)) == [UNKNOWN]
+
+
+@pytest.mark.parametrize("kind", ["provider", "nested_model"])
+def test_invalid_before_start_cleared_by_valid_mid_turn_snapshot(tmp_path, kind):
+    # Nothing invalid since the latest valid owned snapshot, none during the turn.
+    events = [_bad(kind), _event("task_started", turn_id="t1"), _ctx("t1"),
+              _settings("gpt-6.2-astra", "default"), _count(1)]
+    assert _attributed(_read(tmp_path, events)) == [RECOVERED]
