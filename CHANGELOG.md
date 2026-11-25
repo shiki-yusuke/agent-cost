@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.5.7
+
+Reader fix: the Codex Astra path recovers the exact Astra model name for
+turns it cannot price and keeps identical settings re-sends priced. No catalog
+or schema change.
 
 ### Fixed
 
