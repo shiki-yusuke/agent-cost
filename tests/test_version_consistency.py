@@ -1,7 +1,7 @@
 """Spec: pyproject.toml's [project].version and agent_cost.__version__ must
-agree, and both must read "0.5.8" for this change (catalog schema "3" adds
-optional time-limited `promotions` for fast multipliers; the bundled catalog
-is unchanged, so it bumps the patch version). A broken
+agree, and both must read "0.5.9" for this change (the Codex reader adopts
+the service_tier snapshot written at turn setup -- a reader fix with no
+catalog or schema change, so it bumps the patch version). A broken
 implementation would bump one file but not the other, or forget the bump
 entirely.
 
@@ -30,5 +30,5 @@ def test_pyproject_version_matches_package_version():
 
 
 def test_version_is_0_5_2():
-    assert agent_cost.__version__ == "0.5.8"
-    assert _pyproject_version() == "0.5.8"
+    assert agent_cost.__version__ == "0.5.9"
+    assert _pyproject_version() == "0.5.9"
