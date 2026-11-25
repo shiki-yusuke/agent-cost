@@ -422,9 +422,10 @@ ascending order without duplicates, and every value must be greater than or
 equal to the same value in the previous tier (the base first). That
 monotonicity is what makes the base tier a true lower bound for a fact whose
 prompt length is unknown. A `schema_version` `"1"` catalog may not contain
-`prompt_tiers`; agent-cost 0.3.0 and earlier reject a `"2"` catalog as
-unsupported rather than mispricing it, so a custom `--rates` file that uses
-tiers must declare `"2"`.
+`prompt_tiers`; tiers are allowed in both `"2"` and `"3"` catalogs, so a
+custom `--rates` file that uses tiers must declare one of them (agent-cost
+0.3.0 and earlier reject a `"2"` catalog as unsupported rather than
+mispricing it).
 
 A catalog with `schema_version` `"3"` may also carry a top-level
 `promotions` array: time-bounded overrides of the fast multiplier for one
@@ -436,12 +437,16 @@ promotion can only lower a price. The optional `uncertain_from` marks the tail
 still applied (e.g. an end date without a timezone); facts there get the same
 multiplier but are reported as `lower_bound`. Each element has exactly the keys
 `id`, `agent` (`"codex"` or `"claude"`), `mode` (only `"fast"`),
-`fast_multiplier`, `effective_from`, `effective_until` (exclusive), optional
-`uncertain_from`, `source` and `note`. Loading fails on unknown or missing
-keys, a duplicate `id`, overlapping promotions for the same agent and mode,
-datetimes without a timezone, a non-numeric, non-finite or negative
-multiplier, `effective_from >= effective_until`, or an `uncertain_from`
-outside `[effective_from, effective_until)`. `promotions` in a `"1"`/`"2"`
+`fast_multiplier` (a decimal JSON string such as `"1.0"`; a JSON number is
+rejected because the JSON parser would round it before validation),
+`effective_from`, `effective_until` (exclusive), optional `uncertain_from`
+(omit the key for no uncertain tail; `null` is rejected), `source` and `note`.
+Loading fails on unknown or missing keys, a duplicate `id`, overlapping
+promotions for the same agent and mode, datetimes without a timezone or with
+more than 6 fractional-second digits, a non-string, non-numeric, non-finite or
+negative multiplier, `effective_from >= effective_until`, or an
+`uncertain_from` that is not a datetime string inside
+`[effective_from, effective_until)`. `promotions` in a `"1"`/`"2"`
 catalog is rejected, and agent-cost 0.5.7 and earlier reject a `"3"` catalog
 as unsupported rather than ignoring its promotions.
 

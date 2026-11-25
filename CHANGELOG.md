@@ -18,8 +18,9 @@ that use it are identical to 0.5.7.
   checks (strict Astra raw ID / agent / mode, rate periods, token kinds) run
   first and are unchanged. Validation is fail-closed (unknown / missing keys,
   duplicate ids, overlapping promotions per agent and mode, timezone-less
-  datetimes, invalid multipliers, empty or inverted windows, `uncertain_from`
-  outside the window). `promotions` in a `"1"`/`"2"` catalog is rejected;
+  datetimes, more than 6 fractional-second digits, multipliers that are not
+  finite non-negative decimal JSON strings, empty or inverted windows, an
+  `uncertain_from` that is `null` or outside the window). `promotions` in a `"1"`/`"2"` catalog is rejected;
   agent-cost 0.5.7 and earlier reject a `"3"` catalog as unsupported. The
   README shows how to add the Codex "Fast at the standard rate through
   December 7th" promotion to a catalog passed with `--rates`.

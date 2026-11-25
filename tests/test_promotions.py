@@ -138,9 +138,10 @@ def test_promotion_never_raises_a_lower_model_multiplier(tmp_path):
         }
     ]
     catalog = load_rates(_catalog_with(tmp_path, [dict(PROMO)], data=data))
-    for at in (FROM, UNCERTAIN, UNTIL - ONE_US):
-        cost, _, credits = price_fact(catalog, _fact("half-fast", at))
-        assert (cost, credits) == (Decimal("2"), Decimal("50"))
+    expected = {FROM: "priced", UNCERTAIN: "lower_bound", UNTIL - ONE_US: "lower_bound"}
+    for at, status in expected.items():
+        # The model multiplier wins, but the uncertain tail stays lower_bound.
+        assert price_fact(catalog, _fact("half-fast", at)) == (Decimal("2"), status, Decimal("50"))
 
 
 @pytest.mark.parametrize("at", [FROM, UNCERTAIN])
@@ -234,6 +235,9 @@ def _without(key):
     return {k: v for k, v in PROMO.items() if k != key}
 
 
+_NO_TAIL = _without("uncertain_from")
+
+
 _REJECTS = {
     "not_a_list": (dict(PROMO), "must be a list"),
     "element_not_object": (["x"], "must be an object"),
@@ -244,7 +248,7 @@ _REJECTS = {
     "empty_id": ([dict(PROMO, id="")], "id must be"),
     "duplicate_id": (
         [
-            dict(PROMO, effective_until="2026-11-26T00:00:00Z", uncertain_from=None),
+            dict(_NO_TAIL, effective_until="2026-11-26T00:00:00Z"),
             dict(PROMO, agent="claude"),
         ],
         "duplicate promotion id",
@@ -253,8 +257,13 @@ _REJECTS = {
     "mode_normal": ([dict(PROMO, mode="normal")], "mode must be"),
     "mode_unknown": ([dict(PROMO, mode="unknown")], "mode must be"),
     "multiplier_not_numeric": ([dict(PROMO, fast_multiplier="cheap")], "invalid decimal"),
-    "multiplier_bool": ([dict(PROMO, fast_multiplier=True)], "decimal string or number"),
-    "multiplier_null": ([dict(PROMO, fast_multiplier=None)], "decimal string or number"),
+    "multiplier_bool": ([dict(PROMO, fast_multiplier=True)], "decimal string"),
+    "multiplier_null": ([dict(PROMO, fast_multiplier=None)], "decimal string"),
+    # JSON numbers are rejected: the parser rounds them to float before Decimal.
+    "multiplier_json_int": ([dict(PROMO, fast_multiplier=1)], "decimal string"),
+    "multiplier_json_float": ([dict(PROMO, fast_multiplier=1.0)], "decimal string"),
+    "multiplier_tiny_negative_number": ([dict(PROMO, fast_multiplier=-1e-400)], "decimal string"),
+    "multiplier_tiny_negative_string": ([dict(PROMO, fast_multiplier="-1e-400")], ">= 0"),
     "multiplier_negative": ([dict(PROMO, fast_multiplier="-1")], ">= 0"),
     "multiplier_nan": ([dict(PROMO, fast_multiplier="NaN")], "finite"),
     "multiplier_infinity": ([dict(PROMO, fast_multiplier="Infinity")], "finite"),
@@ -262,12 +271,26 @@ _REJECTS = {
     "naive_until": ([dict(PROMO, effective_until="2026-12-08T12:00:00")], "timezone"),
     "naive_uncertain": ([dict(PROMO, uncertain_from="2026-12-07T10:00:00")], "timezone"),
     "bad_datetime": ([dict(PROMO, effective_from="soon")], "invalid datetime"),
+    "until_7_fraction_digits": (
+        [dict(PROMO, effective_until="2026-12-08T12:00:00.0000001Z")],
+        "fractional-second",
+    ),
+    "from_comma_7_fraction_digits": (
+        [dict(PROMO, effective_from="2026-11-25T02:05:00,0000001+00:00")],
+        "fractional-second",
+    ),
+    "uncertain_7_fraction_digits": (
+        [dict(PROMO, uncertain_from="2026-12-07T10:00:00.1234567Z")],
+        "fractional-second",
+    ),
+    "uncertain_null": ([dict(PROMO, uncertain_from=None)], "invalid datetime"),
+    "uncertain_number": ([dict(PROMO, uncertain_from=0)], "invalid datetime"),
     "from_equals_until": (
-        [dict(PROMO, effective_until="2026-11-25T02:05:00Z", uncertain_from=None)],
+        [dict(_NO_TAIL, effective_until="2026-11-25T02:05:00Z")],
         "after effective_from",
     ),
     "from_after_until": (
-        [dict(PROMO, effective_until="2026-11-24T00:00:00Z", uncertain_from=None)],
+        [dict(_NO_TAIL, effective_until="2026-11-24T00:00:00Z")],
         "after effective_from",
     ),
     "uncertain_before_from": ([dict(PROMO, uncertain_from="2026-11-25T02:04:59Z")], "uncertain_from"),
@@ -275,8 +298,8 @@ _REJECTS = {
     "overlap_same_scope": (
         [
             dict(PROMO),
-            dict(PROMO, id="p2", effective_from="2026-12-08T11:00:00Z", effective_until="2026-12-20T00:00:00Z",
-                 uncertain_from=None),
+            dict(_NO_TAIL, id="p2", effective_from="2026-12-08T11:00:00Z",
+                 effective_until="2026-12-20T00:00:00Z"),
         ],
         "overlapping promotions",
     ),
@@ -292,11 +315,28 @@ def test_invalid_promotions_are_rejected(tmp_path, promotions, match):
 def test_adjacent_and_cross_agent_promotions_are_accepted(tmp_path):
     promotions = [
         dict(PROMO),
-        dict(PROMO, id="p2", effective_from="2026-12-08T12:00:00Z", effective_until="2026-12-20T00:00:00Z",
-             uncertain_from=None, fast_multiplier="1.5"),
+        dict(_NO_TAIL, id="p2", effective_from="2026-12-08T12:00:00Z",
+             effective_until="2026-12-20T00:00:00Z", fast_multiplier="1.5"),
         dict(PROMO, id="p3", agent="claude"),
     ]
     catalog = load_rates(_catalog_with(tmp_path, promotions))
     assert len(catalog.promotions) == 3
     # p2 starts exactly where the first promotion ends: 1.5 < 2.5 applies.
     assert price_fact(catalog, _fact("gpt-6-astra", UNTIL))[0] == Decimal("15")
+
+
+def test_exact_decimal_multiplier_string_is_kept(tmp_path):
+    # A string keeps its digits; a JSON number 0.99999999999999999 would be 1.0.
+    promo = dict(PROMO, fast_multiplier="0.99999999999999999")
+    catalog = load_rates(_catalog_with(tmp_path, [promo]))
+    assert catalog.promotions[0].fast_multiplier == Decimal("0.99999999999999999")
+    cost, status, credits = price_fact(catalog, _fact("gpt-6-astra", UNCERTAIN))
+    assert status == "lower_bound"
+    assert cost < Decimal("10") and credits < Decimal("250")
+
+
+def test_six_fraction_digits_are_accepted(tmp_path):
+    promo = dict(PROMO, effective_until="2026-12-08T12:00:00.000001Z")
+    catalog = load_rates(_catalog_with(tmp_path, [promo]))
+    assert catalog.promotions[0].effective_until == UNTIL + ONE_US
+    assert price_fact(catalog, _fact("gpt-6-astra", UNTIL)) == (Decimal("10"), "lower_bound", Decimal("250"))

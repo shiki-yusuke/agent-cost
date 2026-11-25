@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -203,11 +203,20 @@ def _parse_datetime(value, *, field_name: str) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+_OVERPRECISE_FRACTION = re.compile(r"[.,]\d{7,}")
+
+
 def _parse_aware_datetime(value, *, field_name: str) -> datetime:
     """Like ``_parse_datetime`` but rejects values without an explicit
     timezone instead of assuming UTC."""
     if not isinstance(value, str):
         raise RatesValidationError(f"invalid datetime for {field_name}: {value!r}")
+    # fromisoformat silently truncates fractional seconds past microseconds,
+    # which would move a window boundary; reject what cannot be represented.
+    if _OVERPRECISE_FRACTION.search(value):
+        raise RatesValidationError(
+            f"{field_name} has more than 6 fractional-second digits: {value!r}"
+        )
     text = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
         dt = datetime.fromisoformat(text)
@@ -219,12 +228,12 @@ def _parse_aware_datetime(value, *, field_name: str) -> datetime:
 
 
 def _parse_promotion_multiplier(value, *, field_name: str) -> Decimal:
-    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
-        raise RatesValidationError(f"{field_name} must be a decimal string or number, got {value!r}")
-    if isinstance(value, float) and not math.isfinite(value):
-        raise RatesValidationError(f"{field_name} must be finite, got {value!r}")
+    # Only JSON strings: a JSON number is rounded to a float by the parser
+    # before Decimal sees it (e.g. -1e-400 -> -0.0, 0.99999999999999999 -> 1.0).
+    if not isinstance(value, str):
+        raise RatesValidationError(f"{field_name} must be a decimal string, got {value!r}")
     try:
-        d = Decimal(str(value))
+        d = Decimal(value)
     except InvalidOperation as exc:
         raise RatesValidationError(f"invalid decimal for {field_name}: {value!r}") from exc
     if not d.is_finite():
@@ -276,7 +285,9 @@ def _build_promotions(raw_list) -> Tuple[Promotion, ...]:
         if effective_from >= effective_until:
             raise RatesValidationError(f"{where}: effective_until must be after effective_from")
         uncertain_from = None
-        if raw.get("uncertain_from") is not None:
+        # Omitting the key means "no uncertain tail"; an explicit null (or any
+        # non-string) is rejected rather than treated as omitted.
+        if "uncertain_from" in raw:
             uncertain_from = _parse_aware_datetime(raw["uncertain_from"], field_name=f"{where}.uncertain_from")
             if not (effective_from <= uncertain_from < effective_until):
                 raise RatesValidationError(
