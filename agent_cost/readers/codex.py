@@ -16,7 +16,7 @@ import re
 import sqlite3
 import tempfile
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -63,31 +63,41 @@ def _service_tier_mode(tier) -> Optional[str]:
     return "unknown"
 
 
-_STARTUP_SKEW = Decimal(1)  # seconds, compared exactly (no microsecond truncation)
+_STARTUP_SKEW = Fraction(1)  # seconds, compared exactly (no rounding or truncation)
+# The extended ISO-8601 form ``_to_utc`` reads, with a ``.`` or ``,`` fraction.
+# ``fullmatch`` with ``re.ASCII``: no trailing newline, no non-ASCII digits.
 _EXACT_TS_RE = re.compile(
-    r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})?$"
+    r"(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:[.,](\d+))?(Z|[+-]\d{2}:?\d{2})?",
+    re.ASCII,
 )
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
-def _exact_seconds(ts) -> Optional[Decimal]:
+def _exact_seconds(ts) -> Optional[Fraction]:
     """Seconds since the epoch, keeping every fractional digit of ``ts``.
 
     ``datetime`` keeps microseconds only, so ``...:01.000000001`` would look
-    exactly one second after ``...:00``. ``None`` if ``ts`` is not an
-    ISO-8601 timestamp of this form.
+    exactly one second after ``...:00``. ``None`` (never an exception) if
+    ``ts`` is not a timestamp ``_to_utc`` reads in the form above, or its
+    whole seconds cannot be converted (e.g. out of the ``datetime`` range).
     """
     if not isinstance(ts, str):
         return None
-    match = _EXACT_TS_RE.match(ts)
+    match = _EXACT_TS_RE.fullmatch(ts)
     if not match:
         return None
     base, fraction, zone = match.groups()
-    whole = _to_utc(base + (zone or ""))
-    if whole is None:
+    try:
+        if _to_utc(ts) is None:  # only timestamps the fact timestamps accept
+            return None
+        whole = _to_utc(base + (zone or ""))
+        if whole is None:
+            return None
+        seconds = (whole - _EPOCH) // timedelta(seconds=1)
+    except (OverflowError, ValueError, TypeError):
         return None
-    seconds = (whole - _EPOCH) // timedelta(seconds=1)
-    return Decimal(seconds) + Decimal("0." + (fraction or "0"))
+    digits = fraction or "0"
+    return Fraction(seconds) + Fraction(int(digits), 10 ** len(digits))
 
 
 def _is_usage_record(event: dict) -> bool:
@@ -123,7 +133,10 @@ def _is_turn_setup_record(event: dict) -> bool:
     ptype = payload.get("type")
     if ptype == "additional_tools":
         return True
-    return ptype == "message" and payload.get("role") in _INIT_MESSAGE_ROLES
+    role = payload.get("role")
+    # Only a string can name an allowed role; any other type (list, dict, ...)
+    # is outside the allowlist rather than an unhashable lookup.
+    return ptype == "message" and isinstance(role, str) and role in _INIT_MESSAGE_ROLES
 
 
 def _valid_snapshot_model(settings) -> Optional[str]:
@@ -164,23 +177,26 @@ class _StartupSnapshot:
        ``turn_context`` (same turn ID; no context with that ID was seen before
        the start either), with the same non-empty model, and passes the Astra
        path's snapshot checks (:func:`_valid_snapshot_model`);
-    3. both records carry parseable timestamps at most one second apart,
-       compared with every fractional digit;
+    3. both records carry timestamps of the form :func:`_exact_seconds`
+       reads, at most one second apart, compared exactly as fractions;
     4. between the start and the first context only turn-setup records were
        seen (:func:`_is_turn_setup_record`), and nothing at all came between
        the context and the snapshot;
     5. no overlap: no other turn was still open when this one started, and
        none has been since the last time every open turn was closed; no
-       malformed record, invalidation or invalid owned snapshot in the turn
-       (callers report these through :meth:`spoil`).
+       malformed record (including a non-object or missing payload),
+       invalidation or invalid owned snapshot in the turn (callers report
+       these through :meth:`spoil`).
 
     Anything else keeps each path's existing handling of a mid-turn snapshot.
+    Per-turn history is keyed by turn ID and kept for the whole rollout: one
+    turn's completion never erases another turn's contexts. No input raises.
     """
 
     def __init__(self):
         self.open = []  # IDs (None if anonymous) of started, not yet completed turns
         self.overlapped = False  # a turn started while another was open
-        self.context_ids = set()  # turn IDs of contexts seen since the last close
+        self.contexts = {}  # turn ID -> models of its turn_context records (whole rollout)
         self._reset(None, False)
 
     def _reset(self, turn_id, eligible):
@@ -194,25 +210,29 @@ class _StartupSnapshot:
         if self.open:
             self.overlapped = True
         self.open.append(turn_id)
-        prior_context = turn_id is not None and turn_id in self.context_ids
-        self.context_ids = set()
+        prior_context = turn_id is not None and turn_id in self.contexts
         self._reset(turn_id, eligible and not self.overlapped)
         self.seen_context = prior_context  # the turn's first context came before its start
 
-    def finish(self, turn_id):
-        """Record any completion event (whether or not the caller closes its turn)."""
+    def finish(self, turn_id, closes_active=False):
+        """Record any completion event.
+
+        ``closes_active``: the caller's existing rule closed its active turn
+        with this completion (e.g. an ID-less completion on the ordinary path).
+        That turn is then no longer open here either, so it cannot make a later
+        turn look overlapped. Contexts recorded per turn are kept.
+        """
         turn_id = turn_id if isinstance(turn_id, str) and turn_id else None
         if turn_id in self.open:
             self.open.remove(turn_id)
         elif None in self.open:
             self.open.remove(None)
+        elif closes_active and self.turn_id in self.open:
+            self.open.remove(self.turn_id)
         if not self.open:
             self.overlapped = False
-
-    def close(self):
-        """The caller closed its active turn."""
-        self.context_ids = set()
-        self._reset(None, False)
+        if closes_active:
+            self._reset(None, False)
 
     def spoil(self):
         self.eligible = False
@@ -224,7 +244,7 @@ class _StartupSnapshot:
         payload = event.get("payload")
         context_id = payload.get("turn_id") if is_context and isinstance(payload, dict) else None
         if is_context and isinstance(context_id, str):
-            self.context_ids.add(context_id)
+            self.contexts.setdefault(context_id, []).append(payload.get("model"))
         if self.turn_id is None:
             return
         self.candidate = None
@@ -330,14 +350,14 @@ class _OwnedServiceTier:
             self.startup.begin(self.turn_id, not overlap and not self.has_pending)
         elif kind in ("task_complete", "turn_complete", "turn_aborted"):
             done = self._id(payload)
-            self.startup.finish(done)
             if done and self.turn_id and done != self.turn_id:
+                self.startup.finish(done)
                 return  # another turn's completion; the active turn continues
+            self.startup.finish(done, closes_active=self.in_turn)
             self.in_turn = False
             self.turn_id = None
             self.current = None
             self.mid_turn = set()
-            self.startup.close()
 
     def mode(self, detected: str) -> Optional[str]:
         """Tier-derived mode for the next delta, or ``None`` to use ``detected``."""
@@ -502,8 +522,8 @@ class _AstraTurnPricing:
             # right before task_started would.
             self.startup.begin(self.active, not overlap and self.selected is None)
         elif kind in ("task_complete", "turn_complete", "turn_aborted"):
-            self.startup.finish(payload.get("turn_id"))
             if not self.active or payload.get("turn_id") != self.active:
+                self.startup.finish(payload.get("turn_id"))
                 self.invalidate()
                 return
             self.active = None
@@ -512,7 +532,7 @@ class _AstraTurnPricing:
             self.ambiguous = False
             self.contexts = {}
             self._reset_turn()
-            self.startup.close()
+            self.startup.finish(self.active, closes_active=True)
 
     def _claim_startup(self, event, setting) -> bool:
         """Whether a valid owned snapshot is the active turn's startup snapshot."""
@@ -705,13 +725,20 @@ def parse_rollout_facts(
                 if strict is not None:
                     strict.invalidate()
                 continue
+            # A non-object payload (or event) is malformed. A missing payload
+            # is malformed for startup purposes only: it keeps its existing
+            # handling otherwise, but never counts as a turn-setup record.
             bad_shape = not isinstance(event, dict) or not isinstance(event.get("payload", {}), dict)
-            if bad_shape:
+            if bad_shape or "payload" not in event:
                 tier.note_malformed()  # never a startup turn on either path
+                if strict is not None:
+                    strict.startup.spoil()
             if strict is not None and bad_shape:
                 malformed += 1
                 strict.invalidate()
                 continue
+            if bad_shape:
+                continue  # nothing more to read from this line on the ordinary path
             if strict is not None:
                 strict.observe(event)
             tier.observe(event)

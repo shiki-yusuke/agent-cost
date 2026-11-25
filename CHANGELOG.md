@@ -10,7 +10,8 @@
   between the start and that context, same turn ID and model, a valid owned
   snapshot, timestamps at most 1 second apart compared exactly, no earlier
   snapshot in or captured for the turn and no overlap, malformed record or
-  invalid snapshot) now sets
+  invalid snapshot; contexts are tracked per turn ID, and unexpected values
+  never stop the aggregation, they only prevent adoption) now sets
   that turn's tier, as if it had arrived before `task_started`. Codex builds in
   use from 2026-11-25 write the Fast (`priority`) snapshot this way, so those
   turns were reported as model `(unknown)` / mode `unknown` and unpriced; they

@@ -968,3 +968,60 @@ def test_startup_snapshot_after_overlap_resolved(tmp_path):
 def test_startup_snapshot_exactly_1s_with_nanoseconds(tmp_path):
     events = _startup_turn(snap_at="2026-11-20T03:00:01.000000000Z") + [_tier_usage(1)]
     assert _outcome(_tier_facts(tmp_path, events)) == [_SOL_FAST]
+
+
+# ── startup snapshot r3: review findings (turn-keyed history, no exceptions) ──
+# Every odd input below must leave the aggregation running as on main: the
+# turn's tokens are still reported, and the startup snapshot is not adopted.
+
+def _turn_b_after_a_with_b_context():
+    return [_turn_marker("task_started", "A"), _tier_ctx(turn="B", model="gpt-5.6-terra"),
+            _turn_marker("task_complete", "A"),
+            _at(_turn_marker("task_started", "B"), "2026-11-20T02:59:58Z"), _tier_ctx(turn="B"),
+            _at(_tier_settings("gpt-6.2-sol", "priority"), "2026-11-20T03:00:00.001Z")]
+
+
+@pytest.mark.parametrize("events", [
+    # P2: A's completion must not erase B's context seen during A.
+    pytest.param(_turn_b_after_a_with_b_context(), id="other_turns_context_survives_completion"),
+    # P2: a non-string role is outside the allowlist (no TypeError).
+    pytest.param(_startup_turn(before_ctx=[_item(type="message", role=[])]), id="role_list"),
+    pytest.param(_startup_turn(before_ctx=[_item(type="message", role={})]), id="role_dict"),
+    # P2: a non-object event_msg payload is malformed and not read any further.
+    pytest.param(_startup_turn(before_ctx=[_at({"type": "event_msg", "payload": [1]}, _CTX_AT)]),
+                 id="event_payload_list"),
+    # P2: a missing payload is malformed, not a turn-setup record.
+    pytest.param(_startup_turn(before_ctx=[_at({"type": "world_state"}, _CTX_AT)]), id="world_state_no_payload"),
+    # P3: exact fractions (Decimal addition would round this to exactly 1 s).
+    pytest.param(_startup_turn(snap_at="2026-11-20T03:00:01.0000000000000000001Z"), id="1e-19_over_1s"),
+    # P3: a trailing newline is not a timestamp _to_utc reads.
+    pytest.param(_startup_turn(snap_at="2026-11-20T03:00:00.001Z\n"), id="trailing_newline"),
+    # P3: out-of-range UTC conversion (OverflowError) means "not adopted".
+    pytest.param(_startup_turn(ctx=_tier_ctx(at="0001-01-01T00:00:00+09:00"),
+                               snap_at="0001-01-01T00:00:00.5+09:00"), id="utc_overflow"),
+])
+def test_startup_r3_findings_keep_mid_turn_handling(tmp_path, events):
+    facts = _tier_facts(tmp_path, [*events, _tier_usage(1)])
+    assert _outcome(facts) == [_UNKNOWN_TIER]
+    assert [f.tokens for f in facts] == [1_000_000]
+
+
+def test_startup_non_object_event_line_is_skipped(tmp_path):
+    # A bare JSON value (not an object) is skipped as on the Astra path.
+    rollout = tmp_path / "tier.jsonl"
+    lines = [*map(json.dumps, _startup_turn()[:1]), "1", "[1]",
+             *map(json.dumps, _startup_turn()[1:] + [_tier_usage(1)])]
+    rollout.write_text("\n".join(lines) + "\n")
+    facts, _, _ = parse_rollout_facts(rollout, model_raw="gpt-6.2-sol", session_id="t1")
+    assert _outcome(facts) == [_UNKNOWN_TIER]
+
+
+def test_startup_after_id_less_completion_of_previous_turn(tmp_path):
+    # The ID-less completion closes A under the existing rule, so B is not overlapped.
+    events = [_turn_marker("task_started", "A"), _tier_event("task_complete")] + _turn_c()
+    assert _outcome(_tier_facts(tmp_path, [*events, _tier_usage(1)])) == [_SOL_FAST]
+
+
+def test_startup_timestamp_with_comma_fraction(tmp_path):
+    events = _startup_turn(snap_at="2026-11-20T03:00:00,125Z") + [_tier_usage(1)]
+    assert _outcome(_tier_facts(tmp_path, events)) == [_SOL_FAST]

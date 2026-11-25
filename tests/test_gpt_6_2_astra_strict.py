@@ -452,3 +452,40 @@ def test_startup_snapshot_after_pre_start_invalid_matches_pre_start_placement(tm
     before = [_bad(kind), valid, _event("task_started", turn_id="t1"), _tctx(), _count(1)]
     expected = [("gpt-6.2-astra", "fast", "priced")]
     assert _attributed(_read(tmp_path, startup)) == _attributed(_read(tmp_path, before)) == expected
+
+
+# ── startup snapshot r3: review findings (turn-keyed history, no exceptions) ──
+# Odd inputs keep the aggregation running as on main and the snapshot is not adopted.
+
+@pytest.mark.parametrize("events, expected", [
+    # P2: A's completion must not erase B's context seen during A.
+    pytest.param([_event("task_started", turn_id="A"), _tctx("B", "gpt-6.2-sol"),
+                  _event("task_complete", turn_id="A"), _event("task_started", turn_id="B"), _tctx("B"),
+                  _settings("gpt-6.2-astra", "priority")], [RECOVERED], id="other_turns_context_survives_completion"),
+    # P2: a non-string role is outside the allowlist (no TypeError).
+    pytest.param(_startup(before_ctx=[_item(type="message", role=[])]), [RECOVERED], id="role_list"),
+    pytest.param(_startup(before_ctx=[_item(type="message", role={})]), [RECOVERED], id="role_dict"),
+    pytest.param(_startup(before_ctx=[{"type": "event_msg", "timestamp": "2026-11-20T03:00:00Z",
+                                       "payload": [1]}]), [UNKNOWN], id="event_payload_list"),
+    # P2: a missing payload is malformed, not a turn-setup record.
+    pytest.param(_startup(before_ctx=[{"type": "world_state", "timestamp": "2026-11-20T03:00:00Z"}]),
+                 [RECOVERED], id="world_state_no_payload"),
+    # P3: exact fractions (Decimal addition would round this to exactly 1 s).
+    pytest.param(_startup(snap=_snap_at("gpt-6.2-astra", "priority", "2026-11-20T03:00:01.0000000000000000001Z")),
+                 [RECOVERED], id="1e-19_over_1s"),
+    pytest.param(_startup(snap=_snap_at("gpt-6.2-astra", "priority", "2026-11-20T03:00:00Z\n")),
+                 [RECOVERED], id="trailing_newline"),
+    # P3: out-of-range UTC conversion (OverflowError) means "not adopted".
+    pytest.param(_startup(ctx=_tctx(at="0001-01-01T00:00:00+09:00"),
+                          snap=_snap_at("gpt-6.2-astra", "priority", "0001-01-01T00:00:00.5+09:00")),
+                 [RECOVERED], id="utc_overflow"),
+])
+def test_startup_r3_findings_keep_existing_attribution(tmp_path, events, expected):
+    facts = _read(tmp_path, [*events, _count(1)])
+    assert _attributed(facts) == expected
+    assert [f.tokens for f in facts] == [1_000_000]
+
+
+def test_startup_timestamp_with_comma_fraction(tmp_path):
+    events = _startup(snap=_snap_at("gpt-6.2-astra", "priority", "2026-11-20T03:00:00,5Z")) + [_count(1)]
+    assert _attributed(_read(tmp_path, events)) == [("gpt-6.2-astra", "fast", "priced")]
