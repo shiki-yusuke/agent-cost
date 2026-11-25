@@ -215,8 +215,13 @@ _OVERPRECISE_FRACTION = re.compile(r"[.,]\d{7,}")
 _AWARE_DATETIME = re.compile(
     r"(?P<base>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})"
     r"(?:\.(?P<fraction>[0-9]{1,6}))?"
-    r"(?P<offset>Z|[+-][0-9]{2}:[0-9]{2})"
+    r"(?P<offset>Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])"
 )
+
+# Multipliers are plain decimals with at most 4 integer and 6 fractional
+# digits: real fast multipliers are short (1.0, 2.0, 2.5), and the bound
+# keeps every product and later sum exact within Decimal's default context.
+_MULTIPLIER_TEXT = re.compile(r"[0-9]{1,4}(?:\.[0-9]{1,6})?")
 
 
 def _parse_aware_datetime(value, *, field_name: str) -> datetime:
@@ -266,6 +271,10 @@ def _parse_promotion_multiplier(value, *, field_name: str) -> Decimal:
         raise RatesValidationError(f"{field_name} must be finite, got {value!r}")
     if d < 0:
         raise RatesValidationError(f"{field_name} must be >= 0, got {d}")
+    if not _MULTIPLIER_TEXT.fullmatch(value):
+        raise RatesValidationError(
+            f"{field_name} must look like N[.NNNNNN] (<= 4 integer and <= 6 fractional digits), got {value!r}"
+        )
     return d
 
 
