@@ -170,6 +170,8 @@ class _AstraTurnPricing:
     Codex 0.153.4 emits thread-owned settings before starting a new turn, but
     standalone updates can also occur while an older request is in flight.
     Only a matching turn context and a stable, owned snapshot permit pricing.
+    When that fails, an exact Astra model may still be recovered from the
+    active turn's context, always with mode ``"unknown"`` (never priced).
     See docs/astra-pricing.md for pinned producer sources and deliberate limits.
     """
 
@@ -180,11 +182,44 @@ class _AstraTurnPricing:
         self.context = None
         self.selected = None
         self.ambiguous = False
+        # Model recovery evidence (see _recovered_model).
+        self.tainted = False  # owned-but-invalid snapshot since the last valid owned one
+        self.contexts = {}  # turn_id -> models of its turn_context events
+        self._reset_turn()
+
+    def _reset_turn(self, tainted=False, overlap=False):
+        self.turn_tainted = tainted  # sticky for the turn once set
+        self.turn_overlap = overlap
+        self.turn_invalidated = False
+        self.turn_foreign_context = False
+        self.turn_snapshots = []  # models of valid owned snapshots seen mid-turn
 
     def invalidate(self):
         self.pending = None
         self.selected = None
         self.ambiguous = True
+        self.turn_invalidated = True
+
+    def _snapshot(self, payload):
+        """Return ``(owned, setting)``; ``setting`` is ``(model, mode)`` or None if invalid."""
+        settings = payload.get("thread_settings")
+        if not self.session_id or payload.get("thread_id") != self.session_id:
+            return False, None
+        if not isinstance(settings, dict):
+            return True, None
+        model = settings.get("model")
+        collab = settings.get("collaboration_mode") or {}
+        if not isinstance(collab, dict):
+            return True, None
+        nested = collab.get("settings", {})
+        if not isinstance(model, str) or not model or settings.get("model_provider_id") != "openai":
+            return True, None
+        if not isinstance(nested, dict) or nested.get("model", model) != model:
+            return True, None
+        tier = settings.get("service_tier")
+        # Only explicit, evidenced request choices; absent/null are not default.
+        mode = "fast" if tier == "priority" else "normal" if tier == "default" else "unknown"
+        return True, (model, mode)
 
     def observe(self, event):
         payload = event.get("payload") or {}
@@ -193,8 +228,11 @@ class _AstraTurnPricing:
             return
         if event.get("type") == "turn_context":
             self.context = (payload.get("turn_id"), payload.get("model"))
+            if isinstance(self.context[0], str):
+                self.contexts.setdefault(self.context[0], []).append(self.context[1])
             if self.active is not None and self.context[0] != self.active:
                 self.ambiguous = True
+                self.turn_foreign_context = True
             if self.active is not None and self.selected and self.context[1] != self.selected[0]:
                 self.ambiguous = True
             return
@@ -202,27 +240,23 @@ class _AstraTurnPricing:
             return
         kind = payload.get("type")
         if kind == "thread_settings_applied":
-            if self.active is not None:
+            owned, setting = self._snapshot(payload)
+            if owned and setting is None:
+                self.tainted = True
+                if self.active is not None:
+                    self.turn_tainted = True
+            elif setting is not None:
+                self.tainted = False
+                if self.active is not None:
+                    self.turn_snapshots.append(setting[0])
+            if self.active is not None and not (
+                    setting is not None and setting == self.selected and setting[0] in _ASTRA_MODEL_IDS):
                 # Settings updates do not change already captured request settings.
                 # The next cumulative delta may straddle that update: never guess.
+                # Only an identical owned Astra re-send (e.g. after compaction) is
+                # known not to change anything.
                 self.ambiguous = True
-            self.pending = None
-            settings = payload.get("thread_settings")
-            if not self.session_id or payload.get("thread_id") != self.session_id or not isinstance(settings, dict):
-                return
-            model = settings.get("model")
-            collab = settings.get("collaboration_mode") or {}
-            if not isinstance(collab, dict):
-                return
-            nested = collab.get("settings", {})
-            if not isinstance(model, str) or not model or settings.get("model_provider_id") != "openai":
-                return
-            if not isinstance(nested, dict) or nested.get("model", model) != model:
-                return
-            tier = settings.get("service_tier")
-            # Only explicit, evidenced request choices; absent/null are not default.
-            mode = "fast" if tier == "priority" else "normal" if tier == "default" else "unknown"
-            self.pending = (model, mode)
+            self.pending = setting
         elif kind in ("task_started", "turn_started"):
             overlap = self.active is not None
             turn_id = payload.get("turn_id")
@@ -231,6 +265,8 @@ class _AstraTurnPricing:
             self.ambiguous = overlap
             if self.context and self.context[0] != self.active:
                 self.context = None
+            self.contexts = {k: v for k, v in self.contexts.items() if k == self.active}
+            self._reset_turn(tainted=self.tainted, overlap=overlap)
         elif kind in ("task_complete", "turn_complete", "turn_aborted"):
             if not self.active or payload.get("turn_id") != self.active:
                 self.invalidate()
@@ -239,11 +275,36 @@ class _AstraTurnPricing:
             self.selected = None
             self.context = None
             self.ambiguous = False
+            self.contexts = {}
+            self._reset_turn()
+
+    def _recovered_model(self):
+        """Exact Astra model of the active turn's context, if nothing contradicts it.
+
+        Used only when pricing attribution fails; the caller pairs it with mode
+        ``"unknown"`` so it stays unpriced. Non-Astra models are never recovered
+        because ordinary catalogs price mode=unknown as standard.
+        """
+        if not self.active or not self.context or self.context[0] != self.active:
+            return None
+        model = self.context[1]
+        if not isinstance(model, str) or model not in _ASTRA_MODEL_IDS:
+            return None
+        if (self.turn_overlap or self.turn_invalidated or self.turn_tainted
+                or self.turn_foreign_context):
+            return None
+        if any(m != model for m in self.contexts.get(self.active, [])):
+            return None
+        if self.selected and self.selected[0] != model:
+            return None
+        if any(m != model for m in self.turn_snapshots):
+            return None
+        return model
 
     def attribution(self):
         if (not self.active or self.ambiguous or not self.selected
                 or self.context != (self.active, self.selected[0])):
-            return None, "unknown"
+            return self._recovered_model(), "unknown"
         model, mode = self.selected
         # Use the existing unknown-model representation for uncertain non-Astra
         # usage too; those catalogs historically price mode=unknown as standard.

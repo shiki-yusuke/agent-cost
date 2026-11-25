@@ -263,7 +263,10 @@ def test_mid_turn_updates_stay_unpriced_until_next_turn(tmp_path, new_model, new
     events += _start("t2", new_model, new_tier) + [_count(3)]
     facts = _read_events(tmp_path, events)
     assert price_fact(load_rates(), facts[0])[0] == 10
-    assert facts[1].model_key == "(unknown)"
+    # A tier-only change keeps the turn's exact Astra context model, which is now
+    # recovered with mode=unknown (still unpriced); a model change stays (unknown).
+    assert facts[1].model_key == ("gpt-6-astra" if new_model == "gpt-6-astra" else "(unknown)")
+    assert facts[1].mode == "unknown"
     assert price_fact(load_rates(), facts[1])[1] == "unpriced"
     assert price_fact(load_rates(), facts[2])[0] == (25 if new_model == "gpt-6-astra" else 5)
     assert _total(facts)["tokens"] == 3_000_000

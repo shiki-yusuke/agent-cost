@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Codex reader (Astra path): an identical owned snapshot re-sent mid-turn (same
+  exact Astra model and tier) no longer invalidates the turn, so it stays priced.
+  When Astra attribution still fails (tier changed mid-turn, first snapshot after
+  the turn start, no snapshot), the exact Astra model is recovered from the
+  turn's `turn_context` instead of `(unknown)`, with mode `unknown` so it stays
+  unpriced. Recovery is refused on any contradiction (other context model,
+  snapshot model mismatch, owned-but-invalid snapshot, overlapping turn,
+  malformed record). Non-Astra models and the ordinary path are unchanged.
+
 ## 0.5.6
 
 Reader fix: the normal Codex path now prices Fast (`service_tier: "priority"`)
