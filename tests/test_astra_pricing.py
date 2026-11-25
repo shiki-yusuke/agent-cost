@@ -311,6 +311,8 @@ def test_cli_mixed_priced_unpriced_contract(tmp_path, monkeypatch, capsys, comma
 @pytest.mark.parametrize("bad", ["{broken", {"type": "event_msg", "payload": []}, 3])
 def test_malformed_event_cannot_leave_stale_standard_setting(tmp_path, bad):
     facts = _read_events(tmp_path, _start() + [_count(1), bad, _count(2)])
+    # The malformed record also blocks model recovery for the rest of the turn.
+    assert [f.model_key for f in facts] == ["gpt-6-astra", "(unknown)"]
     assert _total(facts)["estimated_cost_usd"] == 10
     assert _total(facts)["unpriced_tokens"] == 1_000_000
 

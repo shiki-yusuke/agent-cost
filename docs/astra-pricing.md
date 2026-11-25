@@ -107,12 +107,17 @@ still invalidates the turn, as before.
 When attribution fails, the model (not the mode) may be recovered from the active
 turn's `turn_context`, as mode `unknown` and therefore still `unpriced`. This
 requires an exact Astra ID in that context, agreement with any captured snapshot
-and with every valid owned snapshot seen during the turn, no other turn's context
-during the turn, a single context model for the turn, no overlap with a previous
-turn at its start, no malformed record during the turn, and no owned-but-invalid
-snapshot (wrong provider, contradicting nested model, missing model, non-object
-settings) since the last valid owned snapshot. An invalid snapshot seen during
-the turn blocks recovery for the rest of that turn even if a valid one follows.
+and with every valid owned snapshot seen during the turn, the latest context
+belonging to the active turn (another turn's context in between does not block
+it), a single context model for the turn, no overlap with a previous turn at its
+start, no malformed record during the turn, and no owned-but-invalid snapshot
+(wrong provider, contradicting nested model, missing model, non-object settings,
+a `collaboration_mode` that is present but not an object, e.g. `[]`) since the
+last valid owned snapshot, wherever that valid one arrived (an invalid snapshot
+before the start is cleared by a later valid one, even mid-turn). An invalid
+snapshot seen during the turn blocks recovery for the rest of that turn even if
+a valid one follows. An absent or null `collaboration_mode` is "not stated", not
+invalid; a wrong-typed one is never treated as an identical re-send.
 Non-Astra models are never recovered: ordinary catalogs price mode `unknown` at
 standard rates.
 

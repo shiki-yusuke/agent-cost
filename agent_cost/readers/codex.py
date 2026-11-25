@@ -183,15 +183,16 @@ class _AstraTurnPricing:
         self.selected = None
         self.ambiguous = False
         # Model recovery evidence (see _recovered_model).
-        self.tainted = False  # owned-but-invalid snapshot since the last valid owned one
+        # Owned-but-invalid snapshot since the last valid owned one (wherever that
+        # valid one arrived, including mid-turn).
+        self.tainted = False
         self.contexts = {}  # turn_id -> models of its turn_context events
         self._reset_turn()
 
-    def _reset_turn(self, tainted=False, overlap=False):
-        self.turn_tainted = tainted  # sticky for the turn once set
+    def _reset_turn(self, overlap=False):
+        self.turn_tainted = False  # invalid owned snapshot during this turn; sticky
         self.turn_overlap = overlap
         self.turn_invalidated = False
-        self.turn_foreign_context = False
         self.turn_snapshots = []  # models of valid owned snapshots seen mid-turn
 
     def invalidate(self):
@@ -208,7 +209,9 @@ class _AstraTurnPricing:
         if not isinstance(settings, dict):
             return True, None
         model = settings.get("model")
-        collab = settings.get("collaboration_mode") or {}
+        collab = settings.get("collaboration_mode")
+        if collab is None:  # absent/null only; a wrong type ([], "", 0) is invalid
+            collab = {}
         if not isinstance(collab, dict):
             return True, None
         nested = collab.get("settings", {})
@@ -232,7 +235,6 @@ class _AstraTurnPricing:
                 self.contexts.setdefault(self.context[0], []).append(self.context[1])
             if self.active is not None and self.context[0] != self.active:
                 self.ambiguous = True
-                self.turn_foreign_context = True
             if self.active is not None and self.selected and self.context[1] != self.selected[0]:
                 self.ambiguous = True
             return
@@ -266,7 +268,7 @@ class _AstraTurnPricing:
             if self.context and self.context[0] != self.active:
                 self.context = None
             self.contexts = {k: v for k, v in self.contexts.items() if k == self.active}
-            self._reset_turn(tainted=self.tainted, overlap=overlap)
+            self._reset_turn(overlap=overlap)
         elif kind in ("task_complete", "turn_complete", "turn_aborted"):
             if not self.active or payload.get("turn_id") != self.active:
                 self.invalidate()
@@ -291,7 +293,7 @@ class _AstraTurnPricing:
         if not isinstance(model, str) or model not in _ASTRA_MODEL_IDS:
             return None
         if (self.turn_overlap or self.turn_invalidated or self.turn_tainted
-                or self.turn_foreign_context):
+                or self.tainted):
             return None
         if any(m != model for m in self.contexts.get(self.active, [])):
             return None

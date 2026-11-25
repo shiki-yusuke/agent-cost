@@ -11,7 +11,9 @@
   turn's `turn_context` instead of `(unknown)`, with mode `unknown` so it stays
   unpriced. Recovery is refused on any contradiction (other context model,
   snapshot model mismatch, owned-but-invalid snapshot, overlapping turn,
-  malformed record). Non-Astra models and the ordinary path are unchanged.
+  malformed record). A `collaboration_mode` that is present but not an object
+  (e.g. `[]`) makes the snapshot invalid instead of being read as absent.
+  Non-Astra models and the ordinary path are unchanged.
 
 ## 0.5.6
 
