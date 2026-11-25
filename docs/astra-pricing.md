@@ -109,7 +109,10 @@ turn's `turn_context`, as mode `unknown` and therefore still `unpriced`. This
 requires an exact Astra ID in that context, agreement with any captured snapshot
 and with every valid owned snapshot seen during the turn, the latest context
 belonging to the active turn (another turn's context in between does not block
-it), a single context model for the turn, no overlap with a previous turn at its
+it), a single context model for the turn ID (deliberately counted across all
+contexts carrying that ID, including ones seen before the turn started, so a
+pre-start context with a different model also blocks recovery; this is
+conservative and affects only the displayed model, never pricing), no overlap with a previous turn at its
 start, no malformed record during the turn, and no owned-but-invalid snapshot
 (wrong provider, contradicting nested model, missing model, non-object settings,
 a `collaboration_mode` that is present but not an object, e.g. `[]`) since the
