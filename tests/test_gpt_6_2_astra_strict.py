@@ -297,3 +297,91 @@ def test_invalid_before_start_cleared_by_valid_mid_turn_snapshot(tmp_path, kind)
     events = [_bad(kind), _event("task_started", turn_id="t1"), _ctx("t1"),
               _settings("gpt-6.2-astra", "default"), _count(1)]
     assert _attributed(_read(tmp_path, events)) == [RECOVERED]
+
+
+# ── startup snapshot: replaces the (b2) refusal only for turn-initialization snapshots ──
+# A valid owned snapshot directly after the turn's first turn_context, at most 1 s
+# apart and before any usage record, is the turn's own setting (_StartupSnapshot).
+
+def _tctx(turn="t1", model="gpt-6.2-astra", at="2026-11-20T03:00:00Z"):
+    event = _ctx(turn, model)
+    if at is not None:
+        event["timestamp"] = at
+    return event
+
+
+def _snap_at(model, tier, at):
+    event = _settings(model, tier)
+    event["timestamp"] = at
+    return event
+
+
+def _startup(tier="priority", *, ctx=None, snap=None, before_ctx=(), between=()):
+    return [_event("task_started", turn_id="t1"), *before_ctx, ctx or _tctx(), *between,
+            snap or _settings("gpt-6.2-astra", tier)]
+
+
+def _usage_record():
+    return {"type": "token_usage_record", "timestamp": "2026-11-20T03:00:00Z",
+            "payload": {"turn_id": "t1"}}
+
+
+@pytest.mark.parametrize("tier, mode, cost", [("priority", "fast", 16), ("default", "normal", 8)])
+def test_startup_snapshot_prices_the_turn(tmp_path, tier, mode, cost):
+    events = _startup(tier) + [_usage_record(), _count(1), _event("task_complete", turn_id="t1"),
+                               _event("task_started", turn_id="t2"), _tctx("t2"), _count(2)]
+    facts = _read(tmp_path, events)
+    # The next turn captures it at its start, exactly as for a pre-start snapshot.
+    assert _attributed(facts) == [("gpt-6.2-astra", mode, "priced")] * 2
+    assert _total(facts)["estimated_cost_usd"] == 2 * cost
+
+
+def test_startup_snapshot_without_tier_recovers_model_only(tmp_path):
+    assert _attributed(_read(tmp_path, _startup(None) + [_count(1)])) == [RECOVERED]
+
+
+@pytest.mark.parametrize("events, expected", [
+    pytest.param(_startup(snap=_snap_at("gpt-6.2-astra", "priority", "2026-11-20T03:00:01.001Z")),
+                 [RECOVERED], id="more_than_1s"),
+    pytest.param(_startup(ctx=_tctx(at=None)), [RECOVERED], id="context_without_timestamp"),
+    pytest.param(_startup(snap=_snap_at("gpt-6.2-astra", "priority", "bad")), [RECOVERED],
+                 id="unparseable_snapshot_timestamp"),
+    pytest.param(_startup(between=[_usage_record()]), [RECOVERED], id="context_usage_record_snapshot"),
+    pytest.param(_startup(before_ctx=[_usage_record()]), [RECOVERED], id="usage_record_before_context"),
+    pytest.param(_startup(between=[_count(1)]), [RECOVERED, RECOVERED], id="after_token_count"),
+    pytest.param(_startup(before_ctx=[_count(1)]), [UNKNOWN, RECOVERED], id="token_count_before_context"),
+    pytest.param(_startup(before_ctx=[_tctx()]), [RECOVERED], id="not_first_context"),
+    pytest.param(_startup(snap=_settings("gpt-6.2-sol", "priority")), [UNKNOWN], id="snapshot_model_differs"),
+    pytest.param(_startup(ctx=_tctx("other")), [UNKNOWN], id="other_turns_context"),
+    pytest.param(_startup(before_ctx=[_bad("provider")]), [UNKNOWN], id="invalid_snapshot_in_turn"),
+    pytest.param(_startup(before_ctx=[_settings("gpt-6.2-astra", "default")]), [RECOVERED],
+                 id="second_snapshot_differs"),
+    pytest.param(_startup(between=[{"type": "response_item", "timestamp": "2026-11-20T03:00:00Z",
+                                    "payload": {"type": "reasoning"}}]),
+                 [RECOVERED], id="response_between_context_and_snapshot"),
+    pytest.param([_tctx("t1", "gpt-6.2-sol")] + _startup(), [UNKNOWN], id="pre_start_context_other_model"),
+])
+def test_non_startup_snapshot_keeps_existing_attribution(tmp_path, events, expected):
+    assert _attributed(_read(tmp_path, [*events, _count(2)])) == expected
+
+
+def test_second_snapshot_after_adopted_startup(tmp_path):
+    same = _startup("priority") + [_settings("gpt-6.2-astra", "priority"), _count(1)]
+    assert _attributed(_read(tmp_path, same)) == [("gpt-6.2-astra", "fast", "priced")]
+    changed = _startup("priority") + [_settings("gpt-6.2-astra", "default"), _count(1)]
+    assert _attributed(_read(tmp_path, changed)) == [RECOVERED]
+
+
+def test_startup_snapshot_in_overlapping_turn_is_not_adopted(tmp_path):
+    events = [_event("task_started", turn_id="t0")] + _startup() + [_count(1)]
+    assert _attributed(_read(tmp_path, events)) == [UNKNOWN]
+
+
+def test_startup_snapshot_after_malformed_line_is_not_adopted(tmp_path):
+    path = tmp_path / "events.jsonl"
+    events = _startup() + [_count(1)]
+    lines = [json.dumps(events[0]), "{not json", *map(json.dumps, events[1:])]
+    path.write_text("\n".join(lines) + "\n")
+    facts, malformed, _ = parse_rollout_facts(path, model_raw="gpt-6.2-astra", session_id=SESSION)
+    assert malformed == 1
+    assert _attributed(facts) == [UNKNOWN]

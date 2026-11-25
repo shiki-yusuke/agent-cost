@@ -745,3 +745,140 @@ def test_unrecognized_tier_is_unpriced_when_detection_is_unknown(tmp_path):
     (fact,) = _tier_facts(tmp_path, events)
     assert fact.mode == "unknown"
     assert _priced(fact) == (None, "unpriced", None)
+
+
+# ── startup snapshot: written right after the turn's first turn_context ──
+# Real Codex rollouts (2026-11-25) write the owned snapshot after task_started,
+# directly after the turn's first turn_context and at the same timestamp. Such a
+# snapshot is the turn's own setting, as if it had arrived before task_started.
+
+_CTX_AT = "2026-11-20T03:00:00.000Z"
+
+
+def _at(event, ts):
+    event = dict(event)
+    if ts is None:
+        event.pop("timestamp", None)
+    else:
+        event["timestamp"] = ts
+    return event
+
+
+def _tier_ctx(turn="A", model="gpt-6.2-sol", at=_CTX_AT):
+    return _at({"type": "turn_context", "payload": {"turn_id": turn, "model": model}}, at)
+
+
+def _startup_turn(tier="priority", *, snap_model="gpt-6.2-sol", snap_at="2026-11-20T03:00:00.001Z",
+                  ctx=None, before_ctx=(), between=()):
+    start = _at(_tier_event("task_started", turn_id="A", collaboration_mode_kind="default"),
+                "2026-11-20T02:59:58Z")
+    snapshot = _at(_tier_settings(snap_model, tier), snap_at)
+    return [start, *before_ctx, ctx or _tier_ctx(), *between, snapshot]
+
+
+def _outcome(facts):
+    return [(f.model_raw, f.mode, _priced(f)[1]) for f in facts]
+
+
+_SOL_FAST = ("gpt-6.2-sol", "fast", "priced")
+_SOL_NORMAL = ("gpt-6.2-sol", "normal", "priced")
+_UNKNOWN_TIER = (None, "unknown", "unpriced")
+
+
+@pytest.mark.parametrize("tier, expected, cost", [("priority", _SOL_FAST, 4), ("default", _SOL_NORMAL, 2)])
+def test_startup_snapshot_is_the_turns_tier(tmp_path, tier, expected, cost):
+    prompt = _at({"type": "response_item", "payload": {"type": "message", "role": "user"}}, _CTX_AT)
+    events = _startup_turn(tier, before_ctx=[prompt]) + [
+        {"type": "token_usage_record", "timestamp": _CTX_AT, "payload": {"turn_id": "A"}},
+        _tier_usage(1),
+        _tier_event("task_complete", turn_id="A"),
+        _tier_event("task_started", turn_id="B", collaboration_mode_kind="default"),
+        _tier_usage(2),
+    ]
+    facts = _tier_facts(tmp_path, events)
+    # The next turn captures it at its start, exactly as for a pre-start snapshot.
+    assert _outcome(facts) == [expected, expected]
+    assert [_priced(f)[0] for f in facts] == [cost, cost]
+
+
+def test_startup_snapshot_one_second_apart_is_still_startup(tmp_path):
+    events = _startup_turn(snap_at="2026-11-20T03:00:01.000Z") + [_tier_usage(1)]
+    assert _outcome(_tier_facts(tmp_path, events)) == [_SOL_FAST]
+
+
+@pytest.mark.parametrize("tier", [_UNSET, None])
+def test_startup_snapshot_without_tier_keeps_detection(tmp_path, tier):
+    events = _startup_turn(tier) + [_tier_usage(1)]
+    assert _outcome(_tier_facts(tmp_path, events)) == [_SOL_NORMAL]
+
+
+def _usage_record():
+    return {"type": "token_usage_record", "timestamp": _CTX_AT, "payload": {"turn_id": "A"}}
+
+
+@pytest.mark.parametrize("events", [
+    pytest.param(_startup_turn(snap_at="2026-11-20T03:00:01.001Z"), id="more_than_1s"),
+    pytest.param(_startup_turn(snap_at="2026-11-20T02:59:58.999Z"), id="more_than_1s_before"),
+    pytest.param(_startup_turn(ctx=_tier_ctx(at=None)), id="context_without_timestamp"),
+    pytest.param(_startup_turn(snap_at=None), id="snapshot_without_timestamp"),
+    pytest.param(_startup_turn(ctx=_tier_ctx(at="not-a-time")), id="unparseable_timestamp"),
+    pytest.param(_startup_turn(before_ctx=[_tier_usage(0)]), id="token_count_before"),
+    pytest.param(_startup_turn(before_ctx=[_usage_record()]), id="usage_record_before"),
+    pytest.param(_startup_turn(between=[_usage_record()]), id="context_usage_record_snapshot"),
+    pytest.param(_startup_turn(ctx=_tier_ctx(model="gpt-5.6-terra")), id="context_model_differs"),
+    pytest.param(_startup_turn(ctx=_tier_ctx(turn="B")), id="other_turns_context"),
+    pytest.param(_startup_turn(before_ctx=[_tier_ctx(model="gpt-6.2-sol")]), id="not_first_context"),
+    pytest.param(_startup_turn(before_ctx=[_tier_settings("gpt-6.2-sol", "default")]), id="second_snapshot"),
+    pytest.param(_startup_turn(between=[_at({"type": "response_item", "payload": {"type": "reasoning"}}, _CTX_AT)]),
+                 id="response_between_context_and_snapshot"),
+    pytest.param(_startup_turn(before_ctx=[_tier_ctx(turn="B")]), id="other_turns_context_before"),
+    pytest.param([_tier_event("task_started", turn_id="Z", collaboration_mode_kind="default")]
+                 + _startup_turn(), id="overlapping_turn"),
+])
+def test_non_startup_snapshot_keeps_mid_turn_handling(tmp_path, events):
+    # Each case misses one startup condition; the mid-turn priority disagrees with
+    # the detected normal, so the turn stays (model None, unknown, unpriced).
+    facts = _tier_facts(tmp_path, [*events, _tier_usage(1)])
+    assert _outcome(facts)[-1] == _UNKNOWN_TIER
+
+
+def test_startup_snapshot_after_token_count_keeps_mid_turn_handling(tmp_path):
+    events = _startup_turn()[:2] + [_tier_usage(1)] + _startup_turn()[2:] + [_tier_usage(2)]
+    assert _outcome(_tier_facts(tmp_path, events)) == [_SOL_NORMAL, _UNKNOWN_TIER]
+
+
+def test_startup_snapshot_after_malformed_line_keeps_mid_turn_handling(tmp_path):
+    events = _startup_turn()
+    rollout = tmp_path / "tier.jsonl"
+    lines = [json.dumps(events[0]), "{not json", *map(json.dumps, events[1:]), json.dumps(_tier_usage(1))]
+    rollout.write_text("\n".join(lines) + "\n")
+    facts, malformed, _ = parse_rollout_facts(rollout, model_raw="gpt-6.2-sol", session_id="t1")
+    assert malformed == 1
+    assert _outcome(facts) == [_UNKNOWN_TIER]
+
+
+def test_startup_snapshot_model_must_match_db_model(tmp_path):
+    # Snapshot and context agree on Terra, but facts carry the DB's gpt-6.2-sol.
+    events = _startup_turn(snap_model="gpt-5.6-terra", ctx=_tier_ctx(model="gpt-5.6-terra"))
+    assert _outcome(_tier_facts(tmp_path, [*events, _tier_usage(1)])) == [_UNKNOWN_TIER]
+
+
+def test_late_default_matching_detection_stays_normal(tmp_path):
+    events = _startup_turn("default", snap_at="2026-11-20T03:00:05Z") + [_tier_usage(1)]
+    assert _outcome(_tier_facts(tmp_path, events)) == [_SOL_NORMAL]
+
+
+def test_snapshot_after_adopted_startup_waits_for_next_turn(tmp_path):
+    events = _startup_turn("default") + [
+        _at(_tier_settings("gpt-6.2-sol", "priority"), "2026-11-20T03:00:00.002Z"),
+        _tier_usage(1),
+        _tier_event("task_complete", turn_id="A"),
+        _tier_event("task_started", turn_id="B", collaboration_mode_kind="default"),
+        _tier_usage(2),
+    ]
+    assert _outcome(_tier_facts(tmp_path, events)) == [_SOL_NORMAL, _SOL_FAST]
+
+
+def test_startup_snapshot_does_not_override_captured_tier(tmp_path):
+    events = [_tier_settings("gpt-6.2-sol", "priority")] + _startup_turn("default") + [_tier_usage(1)]
+    assert _outcome(_tier_facts(tmp_path, events)) == [_SOL_FAST]

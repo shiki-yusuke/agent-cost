@@ -124,11 +124,30 @@ invalid; a wrong-typed one is never treated as an identical re-send.
 Non-Astra models are never recovered: ordinary catalogs price mode `unknown` at
 standard rates.
 
-Deliberately not done: a snapshot that first appears after the turn started is
-not used for pricing. It is indistinguishable from a tier change meant for the
-next turn while the in-flight request keeps the settings it was sent with. Such
-turns, and turns with no snapshot at all, get only the recovered model with mode
-`unknown` (fail-closed).
+Startup snapshots (0.5.9): Codex rollouts observed on 2026-11-25 write the
+owned snapshot after `task_started`, directly after the turn's first
+`turn_context` and at the same timestamp (under 1 ms apart), before any response
+or usage record. Such a snapshot is treated as the turn's own setting, exactly as
+if it had arrived before `task_started`, only when all of these hold: the turn
+started with no captured snapshot and has seen no owned snapshot yet; the
+snapshot is the record directly after the turn's first `turn_context` (same turn
+ID) and names the same model; both records carry parseable timestamps at most
+1 second apart; no `token_count` with totals or `token_usage_record` was seen in
+the turn, and nothing at all came between the context and the snapshot; and no
+overlap, malformed record, invalidation, invalid owned snapshot or contradicting
+context was seen in the turn. Its tier is read as before (`priority` Fast,
+`default` Standard, anything else or missing `unknown`). The same rule applies to
+the ordinary (non-Astra) path, which additionally requires the snapshot model to
+equal the DB model written into the facts; there a missing/null tier falls back
+to the existing suffix/collaboration detection.
+
+Deliberately not done: any other snapshot that first appears after the turn
+started is not used for pricing. It is indistinguishable from a tier change meant
+for the next turn while the in-flight request keeps the settings it was sent
+with. Such turns, and turns with no snapshot at all, get only the recovered model
+with mode `unknown` (fail-closed). A later snapshot in a turn whose startup
+snapshot was adopted is handled like any mid-turn update (an identical Astra
+re-send keeps pricing; any difference falls back to model recovery).
 
 Astra -> other-model -> Astra transitions are supported between completed turns
 with consistent snapshots and contexts. A streaming pre-pass selects this guarded
