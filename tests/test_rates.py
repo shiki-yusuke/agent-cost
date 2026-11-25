@@ -234,7 +234,7 @@ def test_unsupported_schema_version_raises(tmp_path):
     data = _minimal_catalog(
         [{"model_key": "m1", "aliases": [], "rates": [_rate("r1", "2025-01-01T00:00:00+00:00")]}]
     )
-    data["schema_version"] = "3"
+    data["schema_version"] = "4"
     path = tmp_path / "rates.json"
     path.write_text(__import__("json").dumps(data))
     with pytest.raises(RatesValidationError, match="schema_version"):

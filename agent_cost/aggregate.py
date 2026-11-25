@@ -37,6 +37,11 @@ def price_fact(catalog: RateCatalog, fact: Fact) -> Tuple[Optional[Decimal], str
     the largest ``prompt_tokens_over`` its ``prompt_tokens`` exceeds (the
     base values when none). A fact whose ``prompt_tokens`` is unknown is
     priced at the base values -- the cheapest tier -- as a lower bound.
+
+    A ``fast`` fact covered by a catalog promotion for its agent uses
+    ``min(model fast_multiplier, promotion fast_multiplier)`` for both USD
+    and credits; inside the promotion's ``[uncertain_from,
+    effective_until)`` stretch it is additionally marked ``lower_bound``.
     """
     resolved_key, period = catalog.rate_for(fact.model_key, fact.occurred_at_utc)
     if resolved_key is None or period is None:
@@ -73,6 +78,15 @@ def price_fact(catalog: RateCatalog, fact: Fact) -> Tuple[Optional[Decimal], str
     entry = catalog.models[resolved_key]
     tokens = Decimal(fact.tokens)
     multiplier = entry.fast_multiplier if fact.mode == "fast" else Decimal("1.0")
+    if fact.mode == "fast":
+        # A catalog promotion (schema "3") can lower the fast multiplier for
+        # one agent during a window. It never raises it (min), and inside the
+        # promotion's uncertain tail the result is only a lower bound.
+        promo = catalog.promotion_for(fact.agent, fact.mode, fact.occurred_at_utc)
+        if promo is not None:
+            multiplier = min(multiplier, promo.fast_multiplier)
+            if promo.is_uncertain(fact.occurred_at_utc):
+                lower_bound = True
     cost = (tokens / Decimal(1_000_000)) * rate * multiplier
 
     credits = None

@@ -426,6 +426,48 @@ prompt length is unknown. A `schema_version` `"1"` catalog may not contain
 unsupported rather than mispricing it, so a custom `--rates` file that uses
 tiers must declare `"2"`.
 
+A catalog with `schema_version` `"3"` may also carry a top-level
+`promotions` array: time-bounded overrides of the fast multiplier for one
+agent (all of its models). A `fast` fact whose agent and mode match and whose
+time is in `[effective_from, effective_until)` is priced -- USD and credits
+alike -- at `min(model fast_multiplier, promotion fast_multiplier)`, so a
+promotion can only lower a price. The optional `uncertain_from` marks the tail
+`[uncertain_from, effective_until)` where it is unknown whether the promotion
+still applied (e.g. an end date without a timezone); facts there get the same
+multiplier but are reported as `lower_bound`. Each element has exactly the keys
+`id`, `agent` (`"codex"` or `"claude"`), `mode` (only `"fast"`),
+`fast_multiplier`, `effective_from`, `effective_until` (exclusive), optional
+`uncertain_from`, `source` and `note`. Loading fails on unknown or missing
+keys, a duplicate `id`, overlapping promotions for the same agent and mode,
+datetimes without a timezone, a non-numeric, non-finite or negative
+multiplier, `effective_from >= effective_until`, or an `uncertain_from`
+outside `[effective_from, effective_until)`. `promotions` in a `"1"`/`"2"`
+catalog is rejected, and agent-cost 0.5.7 and earlier reject a `"3"` catalog
+as unsupported rather than ignoring its promotions.
+
+The bundled catalog carries no promotion: promotions such as Codex's "Fast
+mode billed at the standard rate through December 7th" are announced per
+workspace, and a log line cannot tell whether your workspace was eligible. If
+yours was, copy the bundled catalog (`agent_cost/rates.json` in the installed
+package), set `"schema_version": "3"`, add the promotion, check it with
+`agent-cost rates validate`, and pass it with `--rates`. For that notice:
+
+```json
+"promotions": [
+  {
+    "id": "codex-fast-standard-rate-2026-12",
+    "agent": "codex",
+    "mode": "fast",
+    "fast_multiplier": "1.0",
+    "effective_from": "2026-11-25T02:05:00Z",
+    "uncertain_from": "2026-12-07T10:00:00Z",
+    "effective_until": "2026-12-08T12:00:00Z",
+    "source": "Codex in-app notice: Fast mode billed at the standard rate through December 7th",
+    "note": "effective_from is when the notice was recorded, not an official start. December 7th has no timezone: certain until its earliest end (UTC+14), lower_bound until its latest end (UTC-12)."
+  }
+]
+```
+
 To use your own catalog instead of the one bundled with the package, pass
 `--rates path/to/rates.json` to `report` or `export` -- this fully replaces
 the bundled catalog, it does not merge with it. Inspect any catalog with:

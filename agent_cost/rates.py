@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -34,7 +35,10 @@ RATE_FIELDS = (
 # ``prompt_tiers``; it is a separate version (and "1" may not carry tiers)
 # so that a reader that predates tiers rejects a tiered catalog as
 # unsupported instead of silently pricing every request at the base tier.
-SUPPORTED_SCHEMA_VERSIONS = ("1", "2")
+# Schema "3" adds the optional top-level ``promotions`` array (time-bounded
+# fast-multiplier overrides); "1"/"2" may not carry it, so a reader that
+# predates promotions rejects such a catalog instead of ignoring them.
+SUPPORTED_SCHEMA_VERSIONS = ("1", "2", "3")
 SUPPORTED_CURRENCIES = ("USD",)
 SUPPORTED_UNITS = ("per_mtok",)
 
@@ -74,6 +78,49 @@ class RatePeriod:
         return True
 
 
+PROMOTION_AGENTS = ("codex", "claude")
+PROMOTION_MODES = ("fast",)
+_PROMOTION_REQUIRED_KEYS = (
+    "id",
+    "agent",
+    "mode",
+    "fast_multiplier",
+    "effective_from",
+    "effective_until",
+    "source",
+    "note",
+)
+_PROMOTION_OPTIONAL_KEYS = ("uncertain_from",)
+
+
+@dataclass(frozen=True)
+class Promotion:
+    """A time-bounded override of the fast multiplier for one (agent, mode).
+
+    Applies to every model of ``agent`` for facts whose ``occurred_at_utc``
+    is in ``[effective_from, effective_until)``. ``[uncertain_from,
+    effective_until)``, when set, is the stretch where it is unknown whether
+    the promotion still applied: facts there are priced at the promotion
+    multiplier but marked ``lower_bound``.
+    """
+
+    promotion_id: str
+    agent: str
+    mode: str
+    fast_multiplier: Decimal
+    effective_from: datetime
+    effective_until: datetime
+    uncertain_from: Optional[datetime]
+    source: str
+    note: str
+
+    def covers(self, moment: datetime) -> bool:
+        return self.effective_from <= moment < self.effective_until
+
+    def is_uncertain(self, moment: datetime) -> bool:
+        return self.uncertain_from is not None and self.uncertain_from <= moment < self.effective_until
+
+
 @dataclass(frozen=True)
 class ModelEntry:
     model_key: str
@@ -94,6 +141,18 @@ class RateCatalog:
     models: dict = field(default_factory=dict)
     sha256: str = ""
     _alias_index: dict = field(default_factory=dict)
+    promotions: Tuple[Promotion, ...] = ()
+
+    def promotion_for(self, agent: str, mode: str, occurred_at_utc: datetime) -> Optional[Promotion]:
+        """Return the promotion covering ``(agent, mode)`` at the moment, if any.
+
+        Validation guarantees promotions for the same (agent, mode) never
+        overlap, so at most one can match.
+        """
+        for promo in self.promotions:
+            if promo.agent == agent and promo.mode == mode and promo.covers(occurred_at_utc):
+                return promo
+        return None
 
     def resolve_model_key(self, model_key: str) -> Optional[str]:
         """Map a fact's ``model_key`` to a canonical catalog ``model_key``.
@@ -142,6 +201,113 @@ def _parse_datetime(value, *, field_name: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+def _parse_aware_datetime(value, *, field_name: str) -> datetime:
+    """Like ``_parse_datetime`` but rejects values without an explicit
+    timezone instead of assuming UTC."""
+    if not isinstance(value, str):
+        raise RatesValidationError(f"invalid datetime for {field_name}: {value!r}")
+    text = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise RatesValidationError(f"invalid datetime for {field_name}: {value!r}") from exc
+    if dt.tzinfo is None:
+        raise RatesValidationError(f"{field_name} must include a timezone, got {value!r}")
+    return dt.astimezone(timezone.utc)
+
+
+def _parse_promotion_multiplier(value, *, field_name: str) -> Decimal:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        raise RatesValidationError(f"{field_name} must be a decimal string or number, got {value!r}")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise RatesValidationError(f"{field_name} must be finite, got {value!r}")
+    try:
+        d = Decimal(str(value))
+    except InvalidOperation as exc:
+        raise RatesValidationError(f"invalid decimal for {field_name}: {value!r}") from exc
+    if not d.is_finite():
+        raise RatesValidationError(f"{field_name} must be finite, got {value!r}")
+    if d < 0:
+        raise RatesValidationError(f"{field_name} must be >= 0, got {d}")
+    return d
+
+
+def _build_promotions(raw_list) -> Tuple[Promotion, ...]:
+    if not isinstance(raw_list, list):
+        raise RatesValidationError("promotions must be a list")
+    allowed = set(_PROMOTION_REQUIRED_KEYS) | set(_PROMOTION_OPTIONAL_KEYS)
+    promotions = []
+    seen_ids = set()
+    for idx, raw in enumerate(raw_list):
+        where = f"promotions[{idx}]"
+        if not isinstance(raw, dict):
+            raise RatesValidationError(f"{where}: must be an object")
+        unknown = sorted(set(raw) - allowed)
+        if unknown:
+            raise RatesValidationError(f"{where}: unknown keys {unknown}")
+        missing = [k for k in _PROMOTION_REQUIRED_KEYS if k not in raw]
+        if missing:
+            raise RatesValidationError(f"{where}: missing required keys {missing}")
+        promo_id = raw["id"]
+        if not isinstance(promo_id, str) or not promo_id:
+            raise RatesValidationError(f"{where}: id must be a non-empty string")
+        where = f"promotions[{promo_id}]"
+        if promo_id in seen_ids:
+            raise RatesValidationError(f"duplicate promotion id: {promo_id!r}")
+        seen_ids.add(promo_id)
+        for k in ("source", "note"):
+            if not isinstance(raw[k], str) or not raw[k]:
+                raise RatesValidationError(f"{where}: {k} must be a non-empty string")
+        if raw["agent"] not in PROMOTION_AGENTS:
+            raise RatesValidationError(
+                f"{where}: agent must be one of {PROMOTION_AGENTS}, got {raw['agent']!r}"
+            )
+        if raw["mode"] not in PROMOTION_MODES:
+            raise RatesValidationError(
+                f"{where}: mode must be one of {PROMOTION_MODES}, got {raw['mode']!r}"
+            )
+        multiplier = _parse_promotion_multiplier(
+            raw["fast_multiplier"], field_name=f"{where}.fast_multiplier"
+        )
+        effective_from = _parse_aware_datetime(raw["effective_from"], field_name=f"{where}.effective_from")
+        effective_until = _parse_aware_datetime(raw["effective_until"], field_name=f"{where}.effective_until")
+        if effective_from >= effective_until:
+            raise RatesValidationError(f"{where}: effective_until must be after effective_from")
+        uncertain_from = None
+        if raw.get("uncertain_from") is not None:
+            uncertain_from = _parse_aware_datetime(raw["uncertain_from"], field_name=f"{where}.uncertain_from")
+            if not (effective_from <= uncertain_from < effective_until):
+                raise RatesValidationError(
+                    f"{where}: uncertain_from must be within [effective_from, effective_until)"
+                )
+        promotions.append(
+            Promotion(
+                promotion_id=promo_id,
+                agent=raw["agent"],
+                mode=raw["mode"],
+                fast_multiplier=multiplier,
+                effective_from=effective_from,
+                effective_until=effective_until,
+                uncertain_from=uncertain_from,
+                source=raw["source"],
+                note=raw["note"],
+            )
+        )
+
+    by_scope: dict = {}
+    for promo in promotions:
+        by_scope.setdefault((promo.agent, promo.mode), []).append(promo)
+    for group in by_scope.values():
+        group.sort(key=lambda p: p.effective_from)
+        for a, b in zip(group, group[1:]):
+            if a.effective_until > b.effective_from:
+                raise RatesValidationError(
+                    f"overlapping promotions {a.promotion_id!r} and {b.promotion_id!r} "
+                    f"for agent {a.agent!r} mode {a.mode!r}"
+                )
+    return tuple(promotions)
 
 
 def _build_prompt_tiers(tiers_raw, base_values: dict, *, where: str) -> Tuple[PromptTier, ...]:
@@ -316,6 +482,12 @@ def _validate_and_build(data: dict) -> RateCatalog:
                 raise RatesValidationError(f"duplicate alias: {alias!r}")
             alias_index[alias] = entry.model_key
 
+    promotions: Tuple[Promotion, ...] = ()
+    if "promotions" in data:
+        if schema_version != "3":
+            raise RatesValidationError('promotions requires schema_version "3"')
+        promotions = _build_promotions(data["promotions"])
+
     return RateCatalog(
         schema_version=schema_version,
         catalog_version=catalog_version,
@@ -325,6 +497,7 @@ def _validate_and_build(data: dict) -> RateCatalog:
         sources=sources,
         models=models,
         _alias_index=alias_index,
+        promotions=promotions,
     )
 
 
