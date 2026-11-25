@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Codex reader: a `thread_settings_applied` snapshot written while a turn is
+  initialized (the record directly after the turn's first `turn_context`, with
+  only turn-setup records — tools, non-assistant messages, `world_state` —
+  between the start and that context, same turn ID and model, a valid owned
+  snapshot, timestamps with an offset and up to 9 fractional digits at most
+  1 second apart compared exactly with integer arithmetic (minute-precision,
+  naive or out-of-range timestamps are not adopted), no earlier snapshot in or
+  captured for the turn, no overlap under the path's existing turn state, and no
+  malformed record or invalid snapshot; contexts are tracked per turn ID, and
+  unexpected values never stop the aggregation, they only prevent adoption) now sets
+  that turn's tier, as if it had arrived before `task_started`. Codex builds in
+  use from 2026-11-25 write the Fast (`priority`) snapshot this way, so those
+  turns were reported as model `(unknown)` / mode `unknown` and unpriced; they
+  are now `fast` (ordinary path, which also requires the DB model to match) or
+  priced Astra turns. Any other mid-turn snapshot keeps the previous handling.
+  Rollouts without such snapshots are unchanged. Astra rollouts from before
+  2026-11-25 can also contain such snapshots and newly become priced, so
+  regenerate any report that covers 2026-11-25 or later, or any Astra usage.
+- Codex reader: lines whose payload is missing or not an object are now
+  counted in `malformed_events` on the ordinary path too (and a missing payload
+  on the Astra path). Token totals and costs are unchanged; only the count grows.
+
 ## 0.5.8
 
 Catalog schema "3" adds optional `promotions` that override the fast

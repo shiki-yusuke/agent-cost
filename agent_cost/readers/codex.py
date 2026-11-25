@@ -16,6 +16,7 @@ import re
 import sqlite3
 import tempfile
 from datetime import datetime, timedelta, timezone
+from fractions import Fraction
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -62,6 +63,221 @@ def _service_tier_mode(tier) -> Optional[str]:
     return "unknown"
 
 
+_STARTUP_SKEW = Fraction(1)  # seconds, compared exactly (no rounding or truncation)
+# ``YYYY-MM-DDTHH:MM:SS`` + optional ``.``/``,`` fraction (1-9 digits) + a
+# required offset (``Z``, ``+HH:MM``, ``+HHMM`` or ``+HH``). ``fullmatch`` with
+# ``re.ASCII``: no trailing newline, no non-ASCII digits. Every group is short,
+# so ``int()`` never meets the interpreter's digit limit. Minute precision
+# (``03:00Z``) and naive timestamps are not read (conservative: not adopted).
+_STARTUP_TS_RE = re.compile(
+    r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:[.,](\d{1,9}))?"
+    r"(?:Z|([+-])(\d{2})(?::?(\d{2}))?)",
+    re.ASCII,
+)
+_MONTH_DAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+
+
+def _days_from_civil(year: int, month: int, day: int) -> int:
+    """Days since 1970-01-01 in the proleptic Gregorian calendar (integers only)."""
+    year -= month <= 2
+    era = year // 400
+    yoe = year - era * 400
+    doy = (153 * (month + (-3 if month > 2 else 9)) + 2) // 5 + day - 1
+    return era * 146097 + yoe * 365 + yoe // 4 - yoe // 100 + doy - 719468
+
+
+def _exact_seconds(ts) -> Optional[Fraction]:
+    """Seconds since the epoch, keeping every fractional digit of ``ts``.
+
+    Pure integer arithmetic (no ``datetime``), so the result is the same on
+    every supported Python and no input raises. ``None`` if ``ts`` is not of
+    the form above or any field is out of range (month 1-12, day within the
+    month, hour 0-23, minute 0-59, second 0-59, offset hour 0-23 and minute
+    0-59).
+    """
+    if not isinstance(ts, str):
+        return None
+    match = _STARTUP_TS_RE.fullmatch(ts)
+    if not match:
+        return None
+    year, month, day, hour, minute, second = (int(g) for g in match.groups()[:6])
+    fraction, sign, off_h, off_m = match.groups()[6:]
+    if not 1 <= month <= 12:
+        return None
+    leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+    month_days = _MONTH_DAYS[month - 1] + (1 if month == 2 and leap else 0)
+    if not 1 <= day <= month_days or hour > 23 or minute > 59 or second > 59:
+        return None
+    offset = 0
+    if sign:
+        oh, om = int(off_h), int(off_m or "0")
+        if oh > 23 or om > 59:
+            return None
+        offset = (oh * 60 + om) * 60 * (1 if sign == "+" else -1)
+    whole = _days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second - offset
+    digits = fraction or "0"
+    return Fraction(whole) + Fraction(int(digits), 10 ** len(digits))
+
+
+def _is_usage_record(event: dict) -> bool:
+    """A record showing that the turn already sent a request or used tokens."""
+    payload = event.get("payload")
+    ptype = payload.get("type") if isinstance(payload, dict) else None
+    if "token_usage_record" in (event.get("type"), ptype):
+        return True
+    if event.get("type") == "event_msg" and ptype == "token_count":
+        info = payload.get("info")
+        return isinstance(info, dict) and info.get("total_token_usage") is not None
+    return False
+
+
+_INIT_MESSAGE_ROLES = {"user", "developer", "system"}
+
+
+def _is_turn_setup_record(event: dict) -> bool:
+    """Records Codex writes while initializing a turn, before its first context.
+
+    Observed order (2026-11-25): ``task_started`` > ``additional_tools`` >
+    non-assistant ``message`` records > ``world_state`` > ``turn_context``.
+    Anything else (assistant message, reasoning, tool calls, other events)
+    means the turn is already running. A non-object payload is malformed and
+    reported separately through :meth:`_StartupSnapshot.spoil`.
+    """
+    kind = event.get("type")
+    if kind == "world_state":
+        return True
+    payload = event.get("payload")
+    if kind != "response_item" or not isinstance(payload, dict):
+        return False
+    ptype = payload.get("type")
+    if ptype == "additional_tools":
+        return True
+    role = payload.get("role")
+    # Only a string can name an allowed role; any other type (list, dict, ...)
+    # is outside the allowlist rather than an unhashable lookup.
+    return ptype == "message" and isinstance(role, str) and role in _INIT_MESSAGE_ROLES
+
+
+def _valid_snapshot_model(settings) -> Optional[str]:
+    """The snapshot's model if ``thread_settings`` passes the Astra path's checks.
+
+    ``model`` must be a non-empty string, ``model_provider_id`` must be
+    ``"openai"``, ``collaboration_mode`` must be an object (absent/null count
+    as empty; a wrong type is invalid) whose ``settings`` (if present) is an
+    object naming no other model.
+    """
+    if not isinstance(settings, dict):
+        return None
+    model = settings.get("model")
+    collab = settings.get("collaboration_mode")
+    if collab is None:  # absent/null only; a wrong type ([], "", 0) is invalid
+        collab = {}
+    if not isinstance(collab, dict):
+        return None
+    nested = collab.get("settings", {})
+    if not isinstance(model, str) or not model or settings.get("model_provider_id") != "openai":
+        return None
+    if not isinstance(nested, dict) or nested.get("model", model) != model:
+        return None
+    return model
+
+
+class _StartupSnapshot:
+    """Recognize the settings snapshot written while a turn is initialized.
+
+    Some Codex builds write the owned ``thread_settings_applied`` snapshot
+    right after the turn's first ``turn_context`` instead of before
+    ``task_started``. Both paths treat such a snapshot as if it had arrived
+    before the start (the turn's own settings) only when all of these hold:
+
+    1. the turn started with nothing captured and has seen no owned snapshot
+       yet (the caller decides the former and passes it to :meth:`begin`);
+    2. the snapshot is the record directly after the turn's first
+       ``turn_context`` (same turn ID; no context with that ID was seen before
+       the start either), with the same non-empty model, and passes the Astra
+       path's snapshot checks (:func:`_valid_snapshot_model`);
+    3. both records carry timestamps of the form :func:`_exact_seconds`
+       reads, at most one second apart, compared exactly as fractions;
+    4. between the start and the first context only turn-setup records were
+       seen (:func:`_is_turn_setup_record`), and nothing at all came between
+       the context and the snapshot;
+    5. no overlap: the caller's existing turn state had no active turn when
+       this one started (the caller passes this to :meth:`begin`; a turn its
+       rule has closed is closed here too, see :meth:`end`); no malformed
+       record (including a non-object or missing payload), invalidation or
+       invalid owned snapshot in the turn (callers report these through
+       :meth:`spoil`).
+
+    Anything else keeps each path's existing handling of a mid-turn snapshot.
+    Per-turn history is keyed by turn ID and kept for the whole rollout: one
+    turn's completion never erases another turn's contexts. No input raises.
+    """
+
+    def __init__(self):
+        self.contexts = {}  # turn ID -> models of its turn_context records (whole rollout)
+        self._reset(None, False)
+
+    def _reset(self, turn_id, eligible):
+        self.turn_id = turn_id
+        self.eligible = bool(eligible) and turn_id is not None
+        self.seen_context = False
+        self.candidate = None  # (model, timestamp) while the first context is the latest record
+
+    def begin(self, turn_id, eligible):
+        """A turn started; ``eligible``: nothing captured and no overlap (caller's state)."""
+        turn_id = turn_id if isinstance(turn_id, str) and turn_id else None
+        prior_context = turn_id is not None and turn_id in self.contexts
+        self._reset(turn_id, eligible)
+        self.seen_context = prior_context  # the turn's first context came before its start
+
+    def end(self):
+        """The caller's existing rule closed its active turn. Contexts are kept.
+
+        A completion the caller does not treat as closing its turn is a
+        non-setup record, so :meth:`step` has already made the turn ineligible.
+        """
+        self._reset(None, False)
+
+    def spoil(self):
+        self.eligible = False
+        self.candidate = None
+
+    def step(self, event):
+        """Record any event other than an owned snapshot."""
+        is_context = event.get("type") == "turn_context"
+        payload = event.get("payload")
+        context_id = payload.get("turn_id") if is_context and isinstance(payload, dict) else None
+        if is_context and isinstance(context_id, str):
+            self.contexts.setdefault(context_id, []).append(payload.get("model"))
+        if self.turn_id is None:
+            return
+        self.candidate = None
+        if is_context:
+            if context_id != self.turn_id:
+                self.spoil()  # another turn's context inside this turn
+            elif not self.seen_context:
+                self.seen_context = True
+                self.candidate = (payload.get("model"), event.get("timestamp"))
+        elif self.seen_context or not _is_turn_setup_record(event):
+            # The turn is already running (response, tool call, usage, other
+            # event) or past its first context: no later snapshot is startup.
+            self.eligible = False
+
+    def claim(self, event, model) -> bool:
+        """Consume an owned, valid snapshot; True if it is the turn's startup snapshot."""
+        candidate, eligible = self.candidate, self.eligible
+        self.spoil()  # at most one owned snapshot per turn can qualify
+        if not eligible or candidate is None:
+            return False
+        context_model, context_ts = candidate
+        if not isinstance(model, str) or not model or context_model != model:
+            return False
+        at, context_at = _exact_seconds(event.get("timestamp")), _exact_seconds(context_ts)
+        if at is None or context_at is None:
+            return False
+        return abs(at - context_at) <= _STARTUP_SKEW
+
+
 class _OwnedServiceTier:
     """Turn-scoped ``service_tier`` for the ordinary (non-Astra) path.
 
@@ -75,43 +291,72 @@ class _OwnedServiceTier:
     one first appears mid-turn, the rest of the turn keeps the detected mode
     when the tier agrees with it and is ``"unknown"`` otherwise. A completion
     closes the turn unless both it and the turn carry differing turn IDs.
+
+    Exception: a startup snapshot (see :class:`_StartupSnapshot`) whose model
+    also equals the DB model written into the facts is the turn's own setting,
+    exactly as if it had arrived before the start. A turn that captured an
+    owned snapshot at its start (even one without a tier) never adopts one.
     """
 
-    def __init__(self, session_id):
+    def __init__(self, session_id, model_raw: Optional[str] = None):
         self.session_id = session_id
+        self.model_raw = model_raw  # the model written into this rollout's facts
         self.pending: Optional[str] = None  # latest owned snapshot's mode
+        self.has_pending = False  # an owned snapshot exists (its tier may be absent/null)
         self.current: Optional[str] = None  # mode captured at turn start
         self.in_turn = False
         self.turn_id: Optional[str] = None
         self.mid_turn: set = set()  # explicit modes seen mid-turn (current is None)
+        self.startup = _StartupSnapshot()
 
     @staticmethod
     def _id(payload) -> Optional[str]:
         turn_id = payload.get("turn_id")
         return turn_id if isinstance(turn_id, str) and turn_id else None
 
-    def observe(self, payload):
+    def note_malformed(self):
+        self.startup.spoil()
+
+    def observe(self, event):
+        if not isinstance(event, dict):
+            return
+        payload = event.get("payload")
+        if event.get("type") != "event_msg" or not isinstance(payload, dict):
+            self.startup.step(event)
+            return
         kind = payload.get("type")
         if kind == "thread_settings_applied":
             settings = payload.get("thread_settings")
             if not self.session_id or payload.get("thread_id") != self.session_id:
+                self.startup.step(event)
                 return
             if not isinstance(settings, dict):
+                self.startup.spoil()
                 return
             # Each snapshot replaces the previous one: absent/null resets to
             # "not stated" instead of inheriting an earlier tier.
             self.pending = _service_tier_mode(settings.get("service_tier"))
+            self.has_pending = True
+            model = _valid_snapshot_model(settings)
+            if self.startup.claim(event, model if model == self.model_raw else None):
+                self.current = self.pending  # the turn's own startup setting
+                return
             if self.in_turn and self.current is None and self.pending is not None:
                 self.mid_turn.add(self.pending)
-        elif kind in ("task_started", "turn_started"):
+            return
+        self.startup.step(event)
+        if kind in ("task_started", "turn_started"):
+            overlap = self.in_turn
             self.in_turn = True
             self.turn_id = self._id(payload)
             self.current = self.pending
             self.mid_turn = set()
+            self.startup.begin(self.turn_id, not overlap and not self.has_pending)
         elif kind in ("task_complete", "turn_complete", "turn_aborted"):
             done = self._id(payload)
             if done and self.turn_id and done != self.turn_id:
                 return  # another turn's completion; the active turn continues
+            self.startup.end()
             self.in_turn = False
             self.turn_id = None
             self.current = None
@@ -187,6 +432,7 @@ class _AstraTurnPricing:
         # valid one arrived, including mid-turn).
         self.tainted = False
         self.contexts = {}  # turn_id -> models of its turn_context events
+        self.startup = _StartupSnapshot()
         self._reset_turn()
 
     def _reset_turn(self, overlap=False):
@@ -200,24 +446,15 @@ class _AstraTurnPricing:
         self.selected = None
         self.ambiguous = True
         self.turn_invalidated = True
+        self.startup.spoil()
 
     def _snapshot(self, payload):
         """Return ``(owned, setting)``; ``setting`` is ``(model, mode)`` or None if invalid."""
         settings = payload.get("thread_settings")
         if not self.session_id or payload.get("thread_id") != self.session_id:
             return False, None
-        if not isinstance(settings, dict):
-            return True, None
-        model = settings.get("model")
-        collab = settings.get("collaboration_mode")
-        if collab is None:  # absent/null only; a wrong type ([], "", 0) is invalid
-            collab = {}
-        if not isinstance(collab, dict):
-            return True, None
-        nested = collab.get("settings", {})
-        if not isinstance(model, str) or not model or settings.get("model_provider_id") != "openai":
-            return True, None
-        if not isinstance(nested, dict) or nested.get("model", model) != model:
+        model = _valid_snapshot_model(settings)
+        if model is None:
             return True, None
         tier = settings.get("service_tier")
         # Only explicit, evidenced request choices; absent/null are not default.
@@ -229,6 +466,9 @@ class _AstraTurnPricing:
         if not isinstance(payload, dict):
             self.invalidate()
             return
+        is_snapshot = event.get("type") == "event_msg" and payload.get("type") == "thread_settings_applied"
+        if not is_snapshot:
+            self.startup.step(event)
         if event.get("type") == "turn_context":
             self.context = (payload.get("turn_id"), payload.get("model"))
             if isinstance(self.context[0], str):
@@ -243,6 +483,17 @@ class _AstraTurnPricing:
         kind = payload.get("type")
         if kind == "thread_settings_applied":
             owned, setting = self._snapshot(payload)
+            if not owned:
+                self.startup.step(event)
+            elif setting is None:
+                self.startup.spoil()
+            elif self._claim_startup(event, setting):
+                # Written while the turn was initialized: the turn's own setting,
+                # as if it had arrived before task_started (_StartupSnapshot).
+                self.tainted = False
+                self.turn_snapshots.append(setting[0])
+                self.pending = self.selected = setting
+                return
             if owned and setting is None:
                 self.tainted = True
                 if self.active is not None:
@@ -269,9 +520,13 @@ class _AstraTurnPricing:
                 self.context = None
             self.contexts = {k: v for k, v in self.contexts.items() if k == self.active}
             self._reset_turn(overlap=overlap)
+            # An earlier invalid snapshot (self.tainted) does not block it: a
+            # startup snapshot clears it exactly as the same snapshot placed
+            # right before task_started would.
+            self.startup.begin(self.active, not overlap and self.selected is None)
         elif kind in ("task_complete", "turn_complete", "turn_aborted"):
             if not self.active or payload.get("turn_id") != self.active:
-                self.invalidate()
+                self.invalidate()  # also spoils the startup candidate
                 return
             self.active = None
             self.selected = None
@@ -279,6 +534,17 @@ class _AstraTurnPricing:
             self.ambiguous = False
             self.contexts = {}
             self._reset_turn()
+            self.startup.end()
+
+    def _claim_startup(self, event, setting) -> bool:
+        """Whether a valid owned snapshot is the active turn's startup snapshot."""
+        model = setting[0]
+        context_ok = (
+            self.active is not None and not self.ambiguous
+            and self.context == (self.active, model)
+            and self.contexts.get(self.active) == [model]
+        )
+        return self.startup.claim(event, model) and context_ok
 
     def _recovered_model(self):
         """Exact Astra model of the active turn's context, if nothing contradicts it.
@@ -442,7 +708,7 @@ def parse_rollout_facts(
     strict = _AstraTurnPricing(session_id) if _contains_astra(rollout_path, model_raw) else None
     model_key = normalize_model_key(model_raw)
     collaboration_mode: Optional[str] = None
-    tier = _OwnedServiceTier(session_id)
+    tier = _OwnedServiceTier(session_id, model_raw)
     last_input_total = 0
     last_cached_total = 0
     last_output_total = 0
@@ -457,20 +723,32 @@ def parse_rollout_facts(
                 event = json.loads(line)
             except json.JSONDecodeError:
                 malformed += 1
+                tier.note_malformed()
                 if strict is not None:
                     strict.invalidate()
                 continue
-            if strict is not None and (not isinstance(event, dict) or not isinstance(event.get("payload", {}), dict)):
+            # A non-object payload (or event) and a missing payload are
+            # malformed: counted, and never a startup turn on either path. A
+            # missing payload otherwise keeps its existing handling, and a
+            # non-object one carries nothing the ordinary path reads (main
+            # read it as an empty payload), so only the count changes.
+            bad_shape = not isinstance(event, dict) or not isinstance(event.get("payload", {}), dict)
+            if bad_shape or "payload" not in event:
                 malformed += 1
-                strict.invalidate()
+                tier.note_malformed()
+                if strict is not None:
+                    strict.startup.spoil()
+            if bad_shape:
+                if strict is not None:
+                    strict.invalidate()
                 continue
             if strict is not None:
                 strict.observe(event)
+            tier.observe(event)
             if event.get("type") != "event_msg":
                 continue
             payload = event.get("payload") or {}
             ptype = payload.get("type")
-            tier.observe(payload)
             if ptype == "task_started":
                 cm = payload.get("collaboration_mode_kind")
                 if cm is not None and collaboration_mode is None:
@@ -487,6 +765,7 @@ def parse_rollout_facts(
             occurred_at = _to_utc(event.get("timestamp"))
             if occurred_at is None:
                 malformed += 1
+                tier.note_malformed()
                 continue
 
             input_total = int(total.get("input_tokens") or 0)

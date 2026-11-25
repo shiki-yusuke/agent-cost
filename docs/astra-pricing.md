@@ -124,11 +124,62 @@ invalid; a wrong-typed one is never treated as an identical re-send.
 Non-Astra models are never recovered: ordinary catalogs price mode `unknown` at
 standard rates.
 
-Deliberately not done: a snapshot that first appears after the turn started is
-not used for pricing. It is indistinguishable from a tier change meant for the
-next turn while the in-flight request keeps the settings it was sent with. Such
-turns, and turns with no snapshot at all, get only the recovered model with mode
-`unknown` (fail-closed).
+Startup snapshots (0.5.9): Codex rollouts observed on 2026-11-25 write the
+owned snapshot after `task_started`, directly after the turn's first
+`turn_context` and at the same timestamp (under 1 ms apart), before any response
+or usage record. Such a snapshot is treated as the turn's own setting, exactly as
+if it had arrived before `task_started`, only when all of these hold: the turn
+started with no captured owned snapshot (even one without a tier) and has seen
+no owned snapshot yet; between the start and the turn's first `turn_context`
+only turn-setup records appear (`response_item` `additional_tools`,
+`response_item` `message` with role `user`/`developer`/`system`, `world_state`);
+the snapshot is the record directly after that first `turn_context` (same turn
+ID, and no context with that ID before the start) and names the same model; the
+snapshot passes the checks above (`model_provider_id` `openai`, object
+`collaboration_mode` whose nested model agrees); both records carry timestamps
+of the form `YYYY-MM-DDTHH:MM:SS[.fraction|,fraction](Z|±HH:MM|±HHMM|±HH)`
+(1-9 fractional digits, an offset required, exactly as written, no trailing
+whitespace) at most 1 second apart, computed with integer arithmetic only (the
+same on every Python version) and compared exactly with every fractional digit
+(so `1.000000001` s is too far); a timestamp outside that form or with an
+out-of-range field (month, day of the month, hour 0-23, minute and second 0-59,
+offset hour 0-23 and minute 0-59) means "not adopted". Minute-precision
+(`03:00Z`) and naive timestamps are not adopted either (conservative). No overlap:
+the path's existing turn state had no active turn when the turn started (a turn
+its existing rule has closed counts as closed here too, so this matches the
+same snapshot placed before `task_started`); and no
+malformed record (including a non-object or missing payload), invalidation,
+invalid owned snapshot or contradicting context was seen in the turn. Contexts
+are remembered per turn ID for the whole rollout, so a context of turn B seen
+while turn A was running still makes B's later context not its first, even
+after A completes. A role that is not a string is not a turn-setup message.
+None of these checks ever stops the aggregation: anything unexpected only
+means the snapshot is not adopted. Its tier is read as before (`priority` Fast,
+`default` Standard, anything else or missing `unknown`). The same rule applies
+to the ordinary (non-Astra) path, which additionally requires the snapshot
+model to equal the DB model written into the facts; there a missing/null tier
+falls back to the existing suffix/collaboration detection. Lines with a
+non-object or missing payload are counted in `malformed_events` on both paths;
+on the ordinary path they carry nothing it reads, so only the count changes.
+
+Invalid snapshots before the start differ between the paths. On the Astra path
+an invalid owned snapshot before the start does not block a later startup
+snapshot: like the same valid snapshot placed right before `task_started`, it
+clears the earlier invalid one and prices the turn. On the ordinary path any
+owned snapshot whose `thread_settings` is an object is captured at the next
+start as before, even if it fails the Astra checks (for example another
+provider): its tier (`default` Standard, say) is that turn's tier, the turn
+adopts no startup snapshot, and a valid `priority` snapshot right after the
+first context does not change it (the turn stays Standard). An owned snapshot
+whose `thread_settings` is not an object is ignored there and does not block.
+
+Deliberately not done: any other snapshot that first appears after the turn
+started is not used for pricing. It is indistinguishable from a tier change meant
+for the next turn while the in-flight request keeps the settings it was sent
+with. Such turns, and turns with no snapshot at all, get only the recovered model
+with mode `unknown` (fail-closed). A later snapshot in a turn whose startup
+snapshot was adopted is handled like any mid-turn update (an identical Astra
+re-send keeps pricing; any difference falls back to model recovery).
 
 Astra -> other-model -> Astra transitions are supported between completed turns
 with consistent snapshots and contexts. A streaming pre-pass selects this guarded

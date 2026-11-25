@@ -381,7 +381,10 @@ network, never calls `gh`, and never resolves branches or PRs.
 **GPT-6 Astra:** Codex Standard/Fast estimates use exact ID `gpt-6-astra` and
 owned settings matched to turn/model context in the public Codex 0.153.4 JSONL
 format. Explicit `default` uses Standard; `priority` uses 2.5x. Missing/ambiguous
-tier or model attribution stays `unpriced`, with tokens preserved. These are
+tier or model attribution stays `unpriced`, with tokens preserved. A snapshot
+written while the turn is initialized (only setup records before its first
+`turn_context`, directly after it, within 1 second, before any response or
+usage) counts as that turn's setting on both the Astra and the ordinary path. These are
 request-setting estimates, not confirmed processing tiers or actual bills.
 The catalog observation cutoff is not an official launch time; earlier usage
 is `unpriced`. See [evidence, synthetic tests and model-switch limits](docs/astra-pricing.md).
