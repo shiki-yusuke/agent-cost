@@ -7,6 +7,7 @@ they're testable independently of any reader.
 
 from __future__ import annotations
 
+import decimal
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -23,6 +24,9 @@ _STATUS_RANK = {"unpriced": 0, "lower_bound": 1, "priced": 2}
 # (agent_cost.readers.codex._ASTRA_MODEL_IDS): exact raw ID and a known mode.
 _STRICT_CODEX_MODEL_KEYS = frozenset({"gpt-6-astra", "gpt-6.2-astra"})
 
+# Working precision for price_fact's multiplications (see there).
+_PRICE_PREC = 100
+
 
 def price_fact(catalog: RateCatalog, fact: Fact) -> Tuple[Optional[Decimal], str, Optional[Decimal]]:
     """Price one fact. Returns ``(estimated_cost_usd, pricing_status, credits)``.
@@ -37,6 +41,11 @@ def price_fact(catalog: RateCatalog, fact: Fact) -> Tuple[Optional[Decimal], str
     the largest ``prompt_tokens_over`` its ``prompt_tokens`` exceeds (the
     base values when none). A fact whose ``prompt_tokens`` is unknown is
     priced at the base values -- the cheapest tier -- as a lower bound.
+
+    A ``fast`` fact covered by a catalog promotion for its agent uses
+    ``min(model fast_multiplier, promotion fast_multiplier)`` for both USD
+    and credits; inside the promotion's ``[uncertain_from,
+    effective_until)`` stretch it is additionally marked ``lower_bound``.
     """
     resolved_key, period = catalog.rate_for(fact.model_key, fact.occurred_at_utc)
     if resolved_key is None or period is None:
@@ -73,13 +82,32 @@ def price_fact(catalog: RateCatalog, fact: Fact) -> Tuple[Optional[Decimal], str
     entry = catalog.models[resolved_key]
     tokens = Decimal(fact.tokens)
     multiplier = entry.fast_multiplier if fact.mode == "fast" else Decimal("1.0")
-    cost = (tokens / Decimal(1_000_000)) * rate * multiplier
+    if fact.mode == "fast":
+        # A catalog promotion (schema "3") can lower the fast multiplier for
+        # one agent during a window. It never raises it (min), and inside the
+        # promotion's uncertain tail the result is only a lower bound.
+        promo = catalog.promotion_for(fact.agent, fact.mode, fact.occurred_at_utc)
+        if promo is not None:
+            multiplier = min(multiplier, promo.fast_multiplier)
+            if promo.is_uncertain(fact.occurred_at_utc):
+                lower_bound = True
+    # Multiply at high precision: the default 28 digits would round a long
+    # multiplier (e.g. "0.999...9" with 29 nines) up to 1, so a lower bound
+    # could exceed the exact product. ROUND_FLOOR keeps any residual rounding
+    # at or below the exact value (all operands are non-negative). The
+    # caller's context is copied, so its traps (billing_plan traps
+    # Inexact/Rounded) still apply; prec is only ever raised. Exact results
+    # -- every packaged-catalog price -- are unchanged.
+    with decimal.localcontext() as ctx:
+        ctx.prec = max(ctx.prec, _PRICE_PREC)
+        ctx.rounding = decimal.ROUND_FLOOR
+        cost = (tokens / Decimal(1_000_000)) * rate * multiplier
 
-    credits = None
-    if entry.credits_per_mtok is not None:
-        credit_rate = entry.credits_per_mtok.get(rate_field)
-        if credit_rate is not None:
-            credits = (tokens / Decimal(1_000_000)) * credit_rate * multiplier
+        credits = None
+        if entry.credits_per_mtok is not None:
+            credit_rate = entry.credits_per_mtok.get(rate_field)
+            if credit_rate is not None:
+                credits = (tokens / Decimal(1_000_000)) * credit_rate * multiplier
 
     status = "lower_bound" if lower_bound else "priced"
     return cost, status, credits

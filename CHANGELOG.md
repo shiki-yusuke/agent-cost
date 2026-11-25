@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+Catalog promotions: a local catalog can now express a time-bounded fast
+multiplier override (e.g. Codex Fast billed at the standard rate). The bundled
+catalog is unchanged (still `schema_version` `"2"`, no promotion), so reports
+that use it are identical to 0.5.7.
+
+### Added
+
+- Catalog `schema_version` `"3"` with an optional top-level `promotions` array.
+  Each promotion (`id`, `agent`, `mode` `"fast"`, `fast_multiplier`,
+  `effective_from`, exclusive `effective_until`, optional `uncertain_from`,
+  `source`, `note`) makes matching `fast` facts use
+  `min(model fast_multiplier, promotion fast_multiplier)` for USD and credits;
+  facts in `[uncertain_from, effective_until)` are `lower_bound`. Existing
+  checks (strict Astra raw ID / agent / mode, rate periods, token kinds) run
+  first and are unchanged. Validation is fail-closed (unknown / missing keys,
+  duplicate ids, overlapping promotions per agent and mode, timezone-less
+  datetimes, more than 6 fractional-second digits, multipliers that are not
+  finite non-negative decimal JSON strings, empty or inverted windows, an
+  `uncertain_from` that is `null` or outside the window). `promotions` in a `"1"`/`"2"` catalog is rejected;
+  agent-cost 0.5.7 and earlier reject a `"3"` catalog as unsupported. The
+  README shows how to add the Codex "Fast at the standard rate through
+  December 7th" promotion to a catalog passed with `--rates`.
+
 ## 0.5.7
 
 Reader fix: the Codex Astra path recovers the exact Astra model name for
