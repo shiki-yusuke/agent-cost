@@ -340,3 +340,170 @@ def test_six_fraction_digits_are_accepted(tmp_path):
     catalog = load_rates(_catalog_with(tmp_path, [promo]))
     assert catalog.promotions[0].effective_until == UNTIL + ONE_US
     assert price_fact(catalog, _fact("gpt-6-astra", UNTIL)) == (Decimal("10"), "lower_bound", Decimal("250"))
+
+
+# ── r2: precision, model multiplier, datetime form, overflow ──
+
+TWENTY_NINE_NINES = "0." + "9" * 29
+
+
+def test_long_promotion_multiplier_does_not_round_up_to_the_model_rate(tmp_path):
+    promo = dict(PROMO, fast_multiplier=TWENTY_NINE_NINES)
+    catalog = load_rates(_catalog_with(tmp_path, [promo]))
+    cost, status, credits = price_fact(catalog, _fact("gpt-6-astra", UNCERTAIN))
+    assert status == "lower_bound"
+    # Exact products (10/MTok and 250 credits/MTok times the multiplier).
+    # 10 x 0.(29 nines) = 9.(28 nines); 250 x 0.(29 nines) = 250 - 2.5e-27.
+    assert cost == Decimal("9." + "9" * 28) and cost < Decimal("10")
+    assert credits == Decimal("249." + "9" * 26 + "75") and credits < Decimal("250")
+
+
+def test_bundled_catalog_prices_are_identical_to_default_precision_arithmetic():
+    import decimal as _decimal
+
+    catalog = load_rates()
+    checked = 0
+    for key, entry in catalog.models.items():
+        for period in entry.rates:
+            at = period.effective_from
+            for kind in ("input_nocache", "cache_read", "cache_write_5m", "cache_write_1h", "output"):
+                for mode in ("normal", "fast"):
+                    for agent in ("codex", "claude"):
+                        fact = _fact(key, at, mode=mode, agent=agent, kind=kind)
+                        got = price_fact(catalog, fact)
+                        if got[1] != "priced":
+                            continue
+                        rate = period.values[kind]
+                        mult = entry.fast_multiplier if mode == "fast" else Decimal("1.0")
+                        with _decimal.localcontext(_decimal.Context()):
+                            want_cost = (Decimal(1_000_000) / Decimal(1_000_000)) * rate * mult
+                            want_credits = None
+                            if entry.credits_per_mtok and entry.credits_per_mtok.get(kind) is not None:
+                                want_credits = Decimal(1) * entry.credits_per_mtok[kind] * mult
+                        assert (str(got[0]), str(got[2])) == (str(want_cost), str(want_credits)), (key, kind, mode)
+                        checked += 1
+    assert checked > 50
+
+
+def _schema3_with_model_multiplier(tmp_path, value, promotions=()):
+    data = _bundled()
+    for m in data["models"]:
+        if m["model_key"] == "gpt-6-astra":
+            m["fast_multiplier"] = value
+    return _catalog_with(tmp_path, list(promotions), data=data)
+
+
+@pytest.mark.parametrize("value", [0.99999999999999999, 2, 2.5, None, True])
+def test_schema_3_rejects_non_string_model_fast_multiplier(tmp_path, value):
+    with pytest.raises(RatesValidationError, match="gpt-6-astra.fast_multiplier must be a decimal string"):
+        load_rates(_schema3_with_model_multiplier(tmp_path, value))
+
+
+@pytest.mark.parametrize("value", ["NaN", "-1", "fast"])
+def test_schema_3_rejects_invalid_model_fast_multiplier_string(tmp_path, value):
+    with pytest.raises(RatesValidationError, match="gpt-6-astra.fast_multiplier"):
+        load_rates(_schema3_with_model_multiplier(tmp_path, value))
+
+
+def test_schema_3_model_multiplier_string_keeps_its_digits(tmp_path):
+    path = _schema3_with_model_multiplier(
+        tmp_path, "0.99999999999999999", [dict(PROMO, fast_multiplier="1.0")]
+    )
+    catalog = load_rates(path)
+    assert catalog.models["gpt-6-astra"].fast_multiplier == Decimal("0.99999999999999999")
+    cost, status, credits = price_fact(catalog, _fact("gpt-6-astra", UNCERTAIN))
+    assert status == "lower_bound"
+    assert cost == Decimal("9.9999999999999999") and credits == Decimal("249.9999999999999975")
+
+
+@pytest.mark.parametrize("schema_version", ["1", "2"])
+def test_schema_1_and_2_still_accept_numeric_model_fast_multiplier(tmp_path, schema_version):
+    data = _bundled()
+    data["schema_version"] = schema_version
+    if schema_version == "1":
+        data["models"] = [m for m in data["models"] if not any("prompt_tiers" in r for r in m["rates"])]
+    for m in data["models"]:
+        if m["model_key"] == "gpt-6-astra":
+            m["fast_multiplier"] = 2.5
+    catalog = load_rates(_write(tmp_path, data))
+    assert catalog.models["gpt-6-astra"].fast_multiplier == Decimal("2.5")
+
+
+_BAD_FORMS = {
+    "offset_with_fraction_seconds": "2026-12-08T12:00:00-00:00:00.5",
+    "offset_with_seconds": "2026-12-08T12:00:00+01:00:30",
+    "offset_without_colon": "2026-12-08T12:00:00+0100",
+    "hour_only_offset": "2026-12-08T12:00:00+01",
+    "no_seconds": "2026-12-08T12:00Z",
+    "space_separator": "2026-12-08 12:00:00Z",
+    "lowercase_z": "2026-12-08T12:00:00z",
+    "comma_fraction": "2026-12-08T12:00:00,5Z",
+    "empty_fraction": "2026-12-08T12:00:00.Z",
+    "basic_format": "20261208T120000Z",
+    "week_date": "2026-W50-1T12:00:00Z",
+    "non_ascii_digits": "２026-12-08T12:00:00Z",
+    "trailing_newline": "2026-12-08T12:00:00Z\n",
+    "offset_out_of_range": "2026-12-08T12:00:00+24:00",
+}
+
+
+@pytest.mark.parametrize("value", list(_BAD_FORMS.values()), ids=list(_BAD_FORMS))
+def test_non_canonical_datetime_forms_are_rejected(tmp_path, value):
+    with pytest.raises(RatesValidationError, match="invalid datetime"):
+        load_rates(_catalog_with(tmp_path, [dict(PROMO, effective_until=value)]))
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("2026-12-08T12:00:00.1Z", UNTIL + timedelta(microseconds=100_000)),
+        ("2026-12-08T12:00:00.12Z", UNTIL + timedelta(microseconds=120_000)),
+        ("2026-12-08T12:00:00.12345Z", UNTIL + timedelta(microseconds=123_450)),
+        ("2026-12-08T21:00:00.5+09:00", UNTIL + timedelta(microseconds=500_000)),
+        ("2026-12-08T11:00:00-01:00", UNTIL),
+    ],
+)
+def test_short_fractions_and_offsets_are_normalized(tmp_path, value, expected):
+    catalog = load_rates(_catalog_with(tmp_path, [dict(PROMO, effective_until=value)]))
+    assert catalog.promotions[0].effective_until == expected
+
+
+def test_short_fraction_parses_identically_without_fromisoformat_extensions(monkeypatch):
+    # Python 3.9's fromisoformat accepts only 3 or 6 fractional digits; the
+    # loader must hand it a 6-digit fraction whatever the input length.
+    import agent_cost.rates as rates_mod
+
+    seen = []
+    real = datetime
+
+    class _Strict(datetime):
+        @classmethod
+        def fromisoformat(cls, text):
+            seen.append(text)
+            return real.fromisoformat(text)
+
+    monkeypatch.setattr(rates_mod, "datetime", _Strict)
+    rates_mod._parse_aware_datetime("2026-12-08T12:00:00.1Z", field_name="x")
+    assert seen == ["2026-12-08T12:00:00.100000+00:00"]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("effective_until", "9999-12-31T23:59:59-01:00"),
+        ("effective_from", "0001-01-01T00:00:00+01:00"),
+    ],
+)
+def test_utc_conversion_overflow_is_a_validation_error(tmp_path, field, value):
+    with pytest.raises(RatesValidationError, match="invalid datetime"):
+        load_rates(_catalog_with(tmp_path, [dict(_NO_TAIL, **{field: value})]))
+
+
+def test_rates_validate_reports_overflow_without_traceback(tmp_path, capsys):
+    from agent_cost.cli import main
+
+    path = _catalog_with(tmp_path, [dict(_NO_TAIL, effective_until="9999-12-31T23:59:59-01:00")])
+    rc = main(["rates", "validate", str(path)])
+    assert rc != 0
+    out = capsys.readouterr()
+    assert "invalid datetime" in out.out + out.err

@@ -206,9 +206,22 @@ def _parse_datetime(value, *, field_name: str) -> datetime:
 _OVERPRECISE_FRACTION = re.compile(r"[.,]\d{7,}")
 
 
+# Promotion boundaries accept exactly one textual form so that every
+# supported Python (3.9's fromisoformat is much stricter than 3.11+'s)
+# parses them identically: ASCII digits, a "T" separator, seconds, an
+# optional 1-6 digit "." fraction, and a "Z" or "+HH:MM"/"-HH:MM" offset.
+# Anything else (offsets with seconds or fractions, week dates, a space
+# separator, ...) is rejected rather than interpreted.
+_AWARE_DATETIME = re.compile(
+    r"(?P<base>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})"
+    r"(?:\.(?P<fraction>[0-9]{1,6}))?"
+    r"(?P<offset>Z|[+-][0-9]{2}:[0-9]{2})"
+)
+
+
 def _parse_aware_datetime(value, *, field_name: str) -> datetime:
-    """Like ``_parse_datetime`` but rejects values without an explicit
-    timezone instead of assuming UTC."""
+    """Parse a promotion boundary: an explicit timezone is required (no
+    UTC assumption) and only the ``_AWARE_DATETIME`` form is accepted."""
     if not isinstance(value, str):
         raise RatesValidationError(f"invalid datetime for {field_name}: {value!r}")
     # fromisoformat silently truncates fractional seconds past microseconds,
@@ -217,14 +230,27 @@ def _parse_aware_datetime(value, *, field_name: str) -> datetime:
         raise RatesValidationError(
             f"{field_name} has more than 6 fractional-second digits: {value!r}"
         )
-    text = value[:-1] + "+00:00" if value.endswith("Z") else value
+    m = _AWARE_DATETIME.fullmatch(value)
+    if m is None:
+        if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?", value):
+            raise RatesValidationError(f"{field_name} must include a timezone, got {value!r}")
+        raise RatesValidationError(
+            f"invalid datetime for {field_name}: {value!r} "
+            "(expected YYYY-MM-DDTHH:MM:SS[.ffffff](Z|+HH:MM|-HH:MM))"
+        )
+    # Pad the fraction to 6 digits: Python 3.9's fromisoformat only accepts
+    # 3 or 6 fractional digits.
+    fraction = m.group("fraction")
+    offset = m.group("offset")
+    text = m.group("base")
+    if fraction is not None:
+        text += "." + fraction.ljust(6, "0")
+    text += "+00:00" if offset == "Z" else offset
     try:
         dt = datetime.fromisoformat(text)
-    except ValueError as exc:
+        return dt.astimezone(timezone.utc)
+    except (ValueError, OverflowError) as exc:
         raise RatesValidationError(f"invalid datetime for {field_name}: {value!r}") from exc
-    if dt.tzinfo is None:
-        raise RatesValidationError(f"{field_name} must include a timezone, got {value!r}")
-    return dt.astimezone(timezone.utc)
 
 
 def _parse_promotion_multiplier(value, *, field_name: str) -> Decimal:
@@ -367,11 +393,20 @@ def _build_model_entry(raw: dict, *, schema_version: str) -> ModelEntry:
 
     aliases = tuple(raw.get("aliases") or [])
 
-    fast_multiplier = _parse_decimal(
-        raw.get("fast_multiplier", "1.0"), field_name=f"{model_key}.fast_multiplier"
-    )
-    if fast_multiplier is None:
-        fast_multiplier = Decimal("1.0")
+    if schema_version == "3":
+        # Schema "3" takes the model multiplier as a JSON string only, like a
+        # promotion's: a JSON number is rounded to a float by the parser
+        # (0.99999999999999999 -> 1.0), which would distort min(model,
+        # promotion) and the lower bound built on it.
+        fast_multiplier = _parse_promotion_multiplier(
+            raw.get("fast_multiplier", "1.0"), field_name=f"{model_key}.fast_multiplier"
+        )
+    else:
+        fast_multiplier = _parse_decimal(
+            raw.get("fast_multiplier", "1.0"), field_name=f"{model_key}.fast_multiplier"
+        )
+        if fast_multiplier is None:
+            fast_multiplier = Decimal("1.0")
 
     credits_raw = raw.get("credits_per_mtok")
     credits_per_mtok = None
